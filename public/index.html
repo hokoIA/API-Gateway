@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Autenticação</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .hero-section {
+      padding: 100px 0;
+      background-color: #f8f9fa;
+    }
+  </style>
+</head>
+<body>
+  <!-- Barra de navegação -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+      <a class="navbar-brand" href="/">Sistema de Autenticação</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/login.html">Login</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/register.html">Registrar</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Seção principal -->
+  <section class="hero-section">
+    <div class="container text-center">
+      <h1 class="display-4 mb-4">Bem-vindo ao Sistema de Autenticação</h1>
+      <p class="lead mb-5">Um sistema de autenticação completo utilizando Express e AWS RDS.</p>
+      <div class="d-grid gap-2 d-md-block">
+        <a href="/login.html" class="btn btn-primary btn-lg px-4 me-md-2">Login</a>
+        <a href="/register.html" class="btn btn-outline-primary btn-lg px-4">Registrar</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Características do sistema -->
+  <section class="py-5">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 mb-4">
+          <div class="card h-100 shadow-sm">
+            <div class="card-body">
+              <h5 class="card-title">Segurança</h5>
+              <p class="card-text">Senhas criptografadas com bcrypt e autenticação via JWT em cookies HTTP-only.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4 mb-4">
+          <div class="card h-100 shadow-sm">
+            <div class="card-body">
+              <h5 class="card-title">AWS RDS</h5>
+              <p class="card-text">Armazenamento seguro de dados de usuários no Amazon Relational Database Service.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4 mb-4">
+          <div class="card h-100 shadow-sm">
+            <div class="card-body">
+              <h5 class="card-title">Express.js</h5>
+              <p class="card-text">Backend robusto construído com Express.js para gerenciar todas as operações de autenticação.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rodapé -->
+  <footer class="py-3 bg-light">
+    <div class="container text-center">
+      <p class="mb-0">© 2025 Sistema de Autenticação. Todos os direitos reservados.</p>
+    </div>
+  </footer>
+
+  <!-- Bootstrap JS com Popper -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

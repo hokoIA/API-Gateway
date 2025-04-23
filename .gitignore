@@ -1,0 +1,34 @@
+# Arquivos e diretórios relacionados ao Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Variáveis de ambiente
+.env
+
+# Logs
+logs
+*.log
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Diretórios de dependências
+/.pnp
+.pnp.js
+
+# Diretórios de produção
+/build
+/dist
+
+# Arquivos de cobertura de testes
+/coverage
+
+# Arquivos temporários
+.tmp
+.temp
+
+# Arquivos de configuração
+package-lock.json
