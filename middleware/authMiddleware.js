@@ -1,10 +1,10 @@
+// Arquivo: middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// Middleware para verificar se o usuário está autenticado
 const authenticateToken = (req, res, next) => {
   const token = req.cookies.jwt;
-  
+
   if (!token) {
     return res.status(401).json({ success: false, message: 'Acesso negado. Token não fornecido.' });
   }
@@ -19,10 +19,9 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-// Middleware para verificar autenticação em páginas HTML
 const authenticatePageAccess = (req, res, next) => {
   const token = req.cookies.jwt;
-  
+
   if (!token) {
     return res.redirect('/login.html');
   }
@@ -37,7 +36,4 @@ const authenticatePageAccess = (req, res, next) => {
   }
 };
 
-module.exports = {
-  authenticateToken,
-  authenticatePageAccess
-};
+module.exports = { authenticateToken, authenticatePageAccess };

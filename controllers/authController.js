@@ -1,6 +1,8 @@
+// Arquivo: controllers/authController.js
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
+const { clearCacheForUser } = require('../helpers/keyHelper');
 require('dotenv').config();
 
 // Função para registrar um novo usuário
@@ -115,6 +117,9 @@ const getUserProfile = async (req, res) => {
 
 // Função para logout
 const logoutUser = (req, res) => {
+  const id_user = req.user?.id;
+  if (id_user) clearCacheForUser(id_user);
+
   res.clearCookie('jwt');
   res.status(200).json({ success: true, message: 'Logout realizado com sucesso' });
 };

@@ -1,43 +1,58 @@
 // app.js
+
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const path = require('path');
+const dotenv = require('dotenv');
+
 const { testConnection } = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
+const customerRoutes = require('./routes/customerRoutes');
+const metricsRoutes = require('./routes/metricsRoutes'); // ✅ Importa rota de métricas
+
 const { authenticatePageAccess } = require('./middleware/authMiddleware');
-require('dotenv').config();
+
+dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware para processar JSON, formulários e cookies
+// Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Servir arquivos estáticos da pasta public
-app.use(express.static(path.join(__dirname, 'public')));
+// Arquivos estáticos
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
-// Rotas da API
+// === Rotas da API ===
 app.use('/api', authRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/metrics', metricsRoutes);
 
-// Proteger páginas que requerem autenticação
+// === Páginas protegidas ===
+app.get('/dashboardPage.html', authenticatePageAccess, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboardPage.html'));
+});
+
 app.get('/profile.html', authenticatePageAccess, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'profile.html'));
 });
 
-// Página inicial
+// === Páginas públicas ===
+app.get('/login.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Iniciar o servidor
+// === Inicialização do servidor ===
 app.listen(port, async () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
-  
-  // Testar conexão com o banco de dados
-  await testConnection();
+  await testConnection(); // Verifica conexão com o banco ao iniciar
 });
 
 module.exports = app;
