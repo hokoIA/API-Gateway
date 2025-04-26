@@ -5,5 +5,6 @@ const metricsController = require('../controllers/metricsController');
 const { authenticateToken } = require('../middleware/authMiddleware');
 
 router.post('/reach', authenticateToken, metricsController.getReachMetrics);
+router.post('/impressions', authenticateToken, metricsController.getImpressionMetrics);
 
 module.exports = router;

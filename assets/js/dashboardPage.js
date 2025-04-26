@@ -3,8 +3,10 @@ document.addEventListener('DOMContentLoaded', async function () {
     const customerListElement = document.getElementById('dropdown-customer-list');
     const selectedCustomerNameElement = document.getElementById('selected-customer-name');
     const userNameElement = document.getElementById('user-name');
-    const chartContainer = document.querySelector('#chart');
-    let chart;
+    const reachChartContainer = document.getElementById('reachChart');
+    const impressionsChartContainer = document.getElementById('impressionsChart');
+    let reachChartInstance = null;
+    let impressionsChartInstance = null;
     let userId = null;
 
     function updateSelectedCustomerDisplay(name) {
@@ -30,7 +32,6 @@ document.addEventListener('DOMContentLoaded', async function () {
                 const data = await response.json();
                 throw new Error(data.message || 'Erro ao carregar perfil');
             }
-
             const data = await response.json();
             userNameElement.textContent = data.user.name;
             userId = data.user.id_user;
@@ -50,17 +51,17 @@ document.addEventListener('DOMContentLoaded', async function () {
             customers.forEach(customer => {
                 const item = document.createElement('li');
                 item.innerHTML = `
-              <a class="dropdown-item dropdown-customer-list-items" href="#" 
-                 data-id="${customer.id_customer}" 
-                 data-name="${customer.name}">
-                ${customer.name}
-              </a>`;
+                    <a class="dropdown-item dropdown-customer-list-items" href="#" 
+                       data-id="${customer.id_customer}" 
+                       data-name="${customer.name}">
+                      ${customer.name}
+                    </a>`;
                 customerListElement.appendChild(item);
             });
 
             customerListElement.innerHTML += `
-              <li><hr class="dropdown-divider"></li>
-              <li><a class="dropdown-item" href="#">Adicionar cliente</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#">Adicionar cliente</a></li>
             `;
 
             document.querySelectorAll('.dropdown-customer-list-items').forEach(item => {
@@ -77,9 +78,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                         try {
                             const response = await fetch('/api/customers/cache', {
                                 method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
+                                headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ id_user: userId, id_customer: id })
                             });
 
@@ -124,16 +123,14 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     }
 
-    async function fetchAndRenderChart(startDate, endDate) {
+    async function fetchAndRenderReachChart(startDate, endDate) {
         const id_customer = localStorage.getItem('selectedCustomerId');
         if (!id_customer) return;
 
         const btnBuscarTexto = document.getElementById('btn-buscar-texto');
         const btnBuscarLoading = document.getElementById('btn-buscar-loading');
-        const chartContainer = document.getElementById('chart');
 
-        // Ocultar gráfico e mostrar loading
-        chartContainer.style.display = 'none';
+        reachChartContainer.style.display = 'none';
         btnBuscarTexto.classList.add('d-none');
         btnBuscarLoading.classList.remove('d-none');
 
@@ -145,27 +142,44 @@ document.addEventListener('DOMContentLoaded', async function () {
             });
 
             const data = await res.json();
-            renderChart(data);
-            chartContainer.style.display = 'block'; // Mostrar gráfico ao final
+            renderReachChart(data);
+            reachChartContainer.style.display = 'block';
         } catch (error) {
-            console.error('Erro ao buscar dados do gráfico:', error);
+            console.error('Erro ao buscar dados de alcance:', error);
         } finally {
             btnBuscarTexto.classList.remove('d-none');
             btnBuscarLoading.classList.add('d-none');
         }
     }
 
-    function renderChart(data) {
-        const options = {
+    async function fetchAndRenderImpressionsChart(startDate, endDate) {
+        const id_customer = localStorage.getItem('selectedCustomerId');
+        if (!id_customer) return;
+
+        impressionsChartContainer.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/metrics/impressions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_customer, startDate, endDate })
+            });
+
+            const data = await res.json();
+            renderImpressionsChart(data);
+            impressionsChartContainer.style.display = 'block';
+        } catch (error) {
+            console.error('Erro ao buscar dados de impressões:', error);
+        }
+    }
+
+    function renderReachChart(data) {
+        if (reachChartInstance) reachChartInstance.destroy();
+
+        reachChartInstance = new ApexCharts(reachChartContainer, {
             series: [
-                {
-                    name: 'Facebook',
-                    data: data.facebook
-                },
-                {
-                    name: 'Instagram',
-                    data: data.instagram
-                }
+                { name: 'Facebook', data: data.facebook },
+                { name: 'Instagram', data: data.instagram }
             ],
             chart: {
                 height: 400,
@@ -185,10 +199,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                     formatter: val => new Date(val).toLocaleDateString('pt-BR'),
                     style: { fontSize: '10px', fontWeight: 500 }
                 },
-                crosshairs: {
-                    show: true,
-                    stroke: { color: '#b6b6b6', width: 1, dashArray: 3 }
-                }
+                crosshairs: { show: true, stroke: { color: '#b6b6b6', width: 1, dashArray: 3 } }
             },
             yaxis: {
                 labels: {
@@ -197,16 +208,20 @@ document.addEventListener('DOMContentLoaded', async function () {
                 }
             },
             legend: {
-                position: 'top', horizontalAlign: 'center', fontSize: '14px', fontWeight: 500,
-                markers: { width: 10, height: 10, radius: 4 }, itemMargin: { horizontal: 15, vertical: 5 }
+                position: 'top',
+                horizontalAlign: 'center',
+                fontSize: '14px',
+                fontWeight: 500,
+                markers: { width: 10, height: 10, radius: 4 },
+                itemMargin: { horizontal: 15, vertical: 5 }
             },
             tooltip: {
-                theme: 'light', shared: true, intersect: false,
+                theme: 'light',
+                shared: true,
+                intersect: false,
                 style: { fontSize: '13px' },
                 y: {
-                    formatter: val => new Intl.NumberFormat('pt-BR', {
-                        style: 'currency', currency: 'BRL'
-                    }).format(val)
+                    formatter: val => new Intl.NumberFormat('pt-BR').format(val)
                 }
             },
             responsive: [{
@@ -217,12 +232,74 @@ document.addEventListener('DOMContentLoaded', async function () {
                     legend: { position: 'bottom' }
                 }
             }]
-        };
+        });
 
-        if (chart) chart.destroy();
-        chart = new ApexCharts(chartContainer, options);
-        chart.render();
-        chartContainer.style.display = 'block';
+        reachChartInstance.render();
+    }
+
+    function renderImpressionsChart(data) {
+        if (impressionsChartInstance) impressionsChartInstance.destroy();
+
+        impressionsChartInstance = new ApexCharts(impressionsChartContainer, {
+            series: [
+                { name: 'Facebook', data: data.facebook },
+                { name: 'Instagram', data: data.instagram },
+                { name: 'Google Analytics', data: data.google }
+            ],
+            chart: {
+                height: 400,
+                type: 'line',
+                toolbar: { show: true },
+                animations: { enabled: true, easing: 'easeinout', speed: 800 },
+                dropShadow: { enabled: true, top: 3, left: 2, blur: 4, opacity: 0.1 }
+            },
+            colors: ['#0d6efd', '#dc3545', '#28a745'],
+            dataLabels: { enabled: false },
+            stroke: { curve: 'smooth', width: 3 },
+            grid: { borderColor: '#e0e0e0', strokeDashArray: 5 },
+            markers: { size: 6, strokeWidth: 3, hover: { size: 8 } },
+            xaxis: {
+                categories: data.labels,
+                labels: {
+                    formatter: val => new Date(val).toLocaleDateString('pt-BR'),
+                    style: { fontSize: '10px', fontWeight: 500 }
+                },
+                crosshairs: { show: true, stroke: { color: '#b6b6b6', width: 1, dashArray: 3 } }
+            },
+            yaxis: {
+                labels: {
+                    formatter: val => new Intl.NumberFormat('pt-BR').format(val),
+                    style: { fontSize: '12px', fontWeight: 500 }
+                }
+            },
+            legend: {
+                position: 'top',
+                horizontalAlign: 'center',
+                fontSize: '14px',
+                fontWeight: 500,
+                markers: { width: 10, height: 10, radius: 4 },
+                itemMargin: { horizontal: 15, vertical: 5 }
+            },
+            tooltip: {
+                theme: 'light',
+                shared: true,
+                intersect: false,
+                style: { fontSize: '13px' },
+                y: {
+                    formatter: val => new Intl.NumberFormat('pt-BR').format(val)
+                }
+            },
+            responsive: [{
+                breakpoint: 576,
+                options: {
+                    chart: { height: 280 },
+                    markers: { size: 4 },
+                    legend: { position: 'bottom' }
+                }
+            }]
+        });
+
+        impressionsChartInstance.render();
     }
 
     document.getElementById('log-out').addEventListener('click', logout);
@@ -233,7 +310,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const formBusca = document.getElementById('form-busca');
     if (formBusca) {
-        formBusca.addEventListener('submit', function (e) {
+        formBusca.addEventListener('submit', async function (e) {
             e.preventDefault();
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
@@ -243,15 +320,13 @@ document.addEventListener('DOMContentLoaded', async function () {
                 return;
             }
 
-            // Conversão segura do formato pt-BR para yyyy-mm-dd
             const formatToISO = (dateStr) => {
                 const [day, month, year] = dateStr.split('/');
                 return `${year}-${month}-${day}`;
             };
 
-            fetchAndRenderChart(formatToISO(startDate), formatToISO(endDate));
+            await fetchAndRenderReachChart(formatToISO(startDate), formatToISO(endDate));
+            await fetchAndRenderImpressionsChart(formatToISO(startDate), formatToISO(endDate));
         });
-    } else {
-        console.warn('❗ Formulário de busca não encontrado no DOM');
     }
 });

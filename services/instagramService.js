@@ -28,3 +28,45 @@ exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day
 
   return allValues;
 };
+
+exports.getImpressions = async (pageId, accessToken, startDate, endDate) => {
+  const allValues = [];
+
+  let current = new Date(startDate);
+  const finalDate = new Date(endDate);
+
+  while (current <= finalDate) {
+    const nextDate = new Date(current);
+    nextDate.setDate(nextDate.getDate() + 1);
+
+    const formattedSince = formatDate(current);
+    const formattedUntil = formatDate(nextDate);
+
+    try {
+      const response = await axios.get(`${BASE_URL}/${pageId}/insights`, {
+        params: {
+          metric: 'views',
+          metric_type: 'total_value',
+          access_token: accessToken,
+          period: 'day',
+          since: formattedSince,
+          until: formattedUntil
+        }
+      });
+
+      let dailyValue = 0;
+
+      if (response.data?.data?.length > 0 && response.data.data[0].total_value?.value !== undefined) {
+        dailyValue = response.data.data[0].total_value.value;
+      }
+
+      allValues.push(dailyValue);
+      
+    } catch (error) {
+      allValues.push(0);
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+  return allValues;
+};

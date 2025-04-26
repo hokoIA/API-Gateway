@@ -28,3 +28,28 @@ exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day
 
   return allValues;
 };
+
+exports.getImpressions = async (pageId, accessToken, startDate, endDate, period = 'day') => {
+  const allValues = [];
+
+  for (const [since, until] of splitDateRange(startDate, endDate, 30)) {
+    const response = await axios.get(`${BASE_URL}/${pageId}/insights`, {
+      params: {
+        metric: 'page_impressions',
+        access_token: accessToken,
+        period,
+        since: formatDate(since),
+        until: formatDate(until)
+      }
+    });
+
+    if (response.status === 200) {
+      const values = response.data.data[0]?.values.map(v => v.value) || [];
+      allValues.push(...values);
+    } else {
+      throw new Error(`Erro Facebook API: ${response.status} - ${response.statusText}`);
+    }
+  }
+
+  return allValues;
+};
