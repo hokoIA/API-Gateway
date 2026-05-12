@@ -89,8 +89,28 @@ exports.getMySubscription = async (req, res) => {
 // POST /api/billing/checkout
 exports.startCheckout = async (req, res) => {
     try {
-        const { plan_code, promo_code } = req.body;
-        if (!plan_code) return res.status(400).json({ success: false, message: 'plan_code é obrigatório' });
+        const { plan_code, promo_code } = req.body || {};
+
+        let selectedPlanCode = plan_code;
+        if (!selectedPlanCode) {
+            const fallbackPlan = await pool.query(
+                `
+                SELECT code
+                FROM plans
+                WHERE active = true
+                ORDER BY amount_cents ASC, created_at ASC
+                LIMIT 1
+                `
+            );
+            selectedPlanCode = fallbackPlan.rows[0]?.code || null;
+        }
+
+        if (!selectedPlanCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'Nenhum plano ativo disponível para checkout.'
+            });
+        }
 
         const user = await getBillingOwnerByAccount(req.user.id_account);
 
@@ -102,15 +122,20 @@ exports.startCheckout = async (req, res) => {
         }
 
         // Preferir env STRIPE_PRICE_*; fallback: buscar price no banco por plan_code
-        const envPrice = process.env[`STRIPE_PRICE_${plan_code.toUpperCase()}`];
+        const envPrice = process.env[`STRIPE_PRICE_${selectedPlanCode.toUpperCase()}`];
         let priceId = envPrice;
         if (!priceId) {
-            const q = await pool.query('SELECT stripe_price_id FROM plans WHERE code=$1 AND active=true', [plan_code]);
+            const q = await pool.query('SELECT stripe_price_id FROM plans WHERE code=$1 AND active=true', [selectedPlanCode]);
             priceId = q.rows[0]?.stripe_price_id;
         }
         if (!priceId) return res.status(400).json({ success: false, message: 'priceId do Stripe não encontrado' });
 
-        const url = await createCheckoutSession({ user, priceId, planCode: plan_code, promoCode: promo_code || null });
+        const url = await createCheckoutSession({
+            user,
+            priceId,
+            planCode: selectedPlanCode,
+            promoCode: promo_code || null
+        });
         res.json({ success: true, url });
     } catch (e) {
         console.error(e);
