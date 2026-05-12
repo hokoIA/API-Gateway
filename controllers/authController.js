@@ -61,7 +61,7 @@ const registerUser = async (req, res) => {
       );
 
       const baseUrl = FRONTEND_BASE_URL;
-      const verifyLink = `${baseUrl}/api/verify-email?token=${token}`;
+      const verifyLink = `${baseUrl}/verify-email?token=${token}`;
 
       await mailer.sendMail({
         from: process.env.SMTP_USER,
@@ -198,7 +198,7 @@ const registerUser = async (req, res) => {
     await client.query('COMMIT');
 
     const baseUrl = FRONTEND_BASE_URL;
-    const verifyLink = `${baseUrl}/api/verify-email?token=${token}`;
+    const verifyLink = `${baseUrl}/verify-email?token=${token}`;
 
     await mailer.sendMail({
       from: process.env.SMTP_USER,
@@ -237,9 +237,16 @@ const registerUser = async (req, res) => {
 
 const verifyEmail = async (req, res) => {
   try {
-    const { token } = req.query;
+    const { token, format } = req.query;
+    const shouldReturnJson = format === 'json';
 
     if (!token) {
+      if (shouldReturnJson) {
+        return res.status(400).json({
+          success: false,
+          message: 'Token de verificação inválido.'
+        });
+      }
       return res.status(400).send('Token de verificação inválido.');
     }
 
@@ -249,11 +256,27 @@ const verifyEmail = async (req, res) => {
       [token]
     );
 
-    if (result.rows.length === 0) return res.status(400).send('Link de verificação inválido ou já utilizado.');
+    if (result.rows.length === 0) {
+      if (shouldReturnJson) {
+        return res.status(400).json({
+          success: false,
+          message: 'Link de verificação inválido ou já utilizado.'
+        });
+      }
+      return res.status(400).send('Link de verificação inválido ou já utilizado.');
+    }
 
     const row = result.rows[0];
 
-    if (new Date() > row.expires_at) return res.status(400).send('Link de verificação expirado. Faça um novo cadastro.');
+    if (new Date() > row.expires_at) {
+      if (shouldReturnJson) {
+        return res.status(400).json({
+          success: false,
+          message: 'Link de verificação expirado. Faça um novo cadastro.'
+        });
+      }
+      return res.status(400).send('Link de verificação expirado. Faça um novo cadastro.');
+    }
 
     // Marca email como verificado
     await pool.query(
@@ -267,10 +290,23 @@ const verifyEmail = async (req, res) => {
       [row.id]
     );
 
-    // Redireciona para login com mensagem de sucesso
-    return res.redirect('/login.html?verified=1');
+    if (shouldReturnJson) {
+      return res.status(200).json({
+        success: true,
+        message: 'E-mail confirmado com sucesso. Agora você pode entrar.'
+      });
+    }
+
+    // Redireciona para login no frontend atual.
+    return res.redirect(`${FRONTEND_BASE_URL}/login?verified=1`);
   } catch (error) {
     console.error('Erro ao verificar email:', error);
+    if (req.query.format === 'json') {
+      return res.status(500).json({
+        success: false,
+        message: 'Erro interno ao verificar email.'
+      });
+    }
     return res.status(500).send('Erro interno ao verificar email.');
   }
 };
