@@ -54,20 +54,31 @@ exports.getMySubscription = async (req, res) => {
             });
         }
 
+        const hasSubscription =
+            !!owner.stripe_subscription_id ||
+            !!owner.subscription_status ||
+            !!owner.plan_code;
+
+        const normalizedStatus = owner.subscription_status || (hasSubscription ? 'unknown' : 'none');
+
         res.json({
             success: true,
-            subscription: {
-                id_user: owner.id_user,
-                plan_code: owner.plan_code,
-                stripe_subscription_id: owner.stripe_subscription_id,
-                subscription_status: owner.subscription_status,
-                current_period_start: owner.current_period_start,
-                current_period_end: owner.current_period_end,
-                trial_start: owner.trial_start,
-                trial_end: owner.trial_end,
-                cancel_at: owner.cancel_at,
-                cancel_at_period_end: owner.cancel_at_period_end
-            }
+            status: normalizedStatus,
+            has_subscription: hasSubscription,
+            subscription: hasSubscription
+                ? {
+                    id_user: owner.id_user,
+                    plan_code: owner.plan_code,
+                    stripe_subscription_id: owner.stripe_subscription_id,
+                    subscription_status: normalizedStatus,
+                    current_period_start: owner.current_period_start,
+                    current_period_end: owner.current_period_end,
+                    trial_start: owner.trial_start,
+                    trial_end: owner.trial_end,
+                    cancel_at: owner.cancel_at,
+                    cancel_at_period_end: owner.cancel_at_period_end
+                }
+                : null
         });
     } catch (e) {
         console.error(e);
