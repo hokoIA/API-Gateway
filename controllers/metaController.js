@@ -284,6 +284,34 @@ exports.connectResource = async (req, res) => {
       [id_customer, p, resource_id, resource_name || null, resource_type, resource_access_token]
     );
 
+    if (p === 'facebook') {
+      await pool.query(
+        `
+        UPDATE customer
+        SET
+          id_facebook_page = $1,
+          access_token_page_facebook = $2,
+          updated_at = NOW()
+        WHERE id_customer = $3
+      `,
+        [resource_id, resource_access_token, id_customer]
+      );
+    }
+
+    if (p === 'instagram') {
+      await pool.query(
+        `
+        UPDATE customer
+        SET
+          id_instagram_page = $1,
+          access_token_page_instagram = $2,
+          updated_at = NOW()
+        WHERE id_customer = $3
+      `,
+        [resource_id, resource_access_token, id_customer]
+      );
+    }
+
     if (p === 'facebook') await processCustomerMetricsPlatform(id_customer, 'facebook');
     else await processCustomerMetricsPlatform(id_customer, 'instagram');
 
