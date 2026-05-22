@@ -10,6 +10,7 @@ require('dotenv').config();
 const GOOGLE_CLIENT_ID = oauthConfig.google.clientId;
 const GOOGLE_CLIENT_SECRET = oauthConfig.google.clientSecret;
 const GOOGLE_REDIRECT_URI = oauthConfig.google.youtubeRedirectUri;
+const FRONTEND_URL = (process.env.FRONTEND_BASE_URL || 'https://www.hokoainalytics.com').replace(/\/$/, '');
 
 const oauth2Client = new google.auth.OAuth2(
     GOOGLE_CLIENT_ID,
@@ -91,7 +92,7 @@ exports.handleOAuthCallback = async (req, res) => {
             [id_customer, userInfo.id, tokens.access_token, tokens.refresh_token || null, expiresAt, tokens.scope || null]
         );
 
-        return res.redirect(`/myCustomersPage.html?open=${encodeURIComponent(id_customer)}`);
+        return res.redirect(`${FRONTEND_URL}/clientes?open=${encodeURIComponent(id_customer)}`);
     } catch (error) {
         console.error('Erro OAuth callback YouTube:', error.response?.data || error);
         return res.status(500).send('Erro ao autenticar com o YouTube');

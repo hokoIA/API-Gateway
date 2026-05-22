@@ -9,6 +9,7 @@ const { oauthConfig } = require('../config/oauth');
 const APP_ID = oauthConfig.meta.appId;
 const APP_SECRET = oauthConfig.meta.appSecret;
 const REDIRECT_URI = oauthConfig.meta.redirectUri;
+const FRONTEND_URL = (process.env.FRONTEND_BASE_URL || 'https://www.hokoainalytics.com').replace(/\/$/, '');
 
 const SCOPES = [
   'public_profile',
@@ -172,7 +173,7 @@ exports.handleOAuthCallback = async (req, res) => {
     await pool.query('COMMIT');
 
     // volta pro acordeão do cliente (platformsPage não entra mais)
-    return res.redirect(`/myCustomersPage.html?open=${encodeURIComponent(id_customer)}`);
+    return res.redirect(`${FRONTEND_URL}/clientes?open=${encodeURIComponent(id_customer)}`);
   } catch (err) {
     try { await pool.query('ROLLBACK'); } catch (_) { }
     console.error('handleOAuthCallback error:', err);

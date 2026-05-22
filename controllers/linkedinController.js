@@ -11,6 +11,7 @@ const LINKEDIN_CLIENT_ID = oauthConfig.linkedin.clientId;
 const LINKEDIN_CLIENT_SECRET = oauthConfig.linkedin.clientSecret;
 const LINKEDIN_API_VERSION = '202508';
 const LINKEDIN_REDIRECT_URI = oauthConfig.linkedin.redirectUri;
+const FRONTEND_URL = (process.env.FRONTEND_BASE_URL || 'https://www.hokoainalytics.com').replace(/\/$/, '');
 
 // 1) Início do OAuth
 exports.startOAuth = (req, res) => {
@@ -108,7 +109,7 @@ exports.handleOAuthCallback = async (req, res) => {
             ]
         );
 
-        return res.redirect(`/myCustomersPage.html?open=${id_customer}`);
+        return res.redirect(`${FRONTEND_URL}/clientes?open=${encodeURIComponent(id_customer)}`);
     } catch (err) {
         return res.status(500).send('Erro ao autenticar com o LinkedIn');
     }
