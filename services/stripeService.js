@@ -1,6 +1,7 @@
 // services/stripeService.js
 const { stripe } = require('../config/stripeConfig');
 const { pool } = require('../config/db'); // :contentReference[oaicite:7]{index=7}
+const { FRONTEND_PATHS, buildFrontendUrl } = require('../config/urls');
 
 const EXTRA_PRICE_ID = process.env.STRIPE_PRICE_CLIENT_EXTRA || null;
 
@@ -9,7 +10,7 @@ async function createBillingPortalSession({ user }) {
     const configId = process.env.STRIPE_PORTAL_CONFIGURATION_ID || null;
     const session = await stripe.billingPortal.sessions.create({
         customer: customerId,
-        return_url: `${process.env.FRONTEND_BASE_URL}/settingsAccountPage.html`,
+        return_url: buildFrontendUrl(FRONTEND_PATHS.settingsBilling),
         ...(configId ? { configuration: configId } : {})
     }); // :contentReference[oaicite:12]{index=12}
     return session.url;
@@ -42,8 +43,8 @@ async function createCheckoutSession({ user, priceId, planCode, promoCode }) {
             app_user_id: String(user.id_user)
         },
         allow_promotion_codes: true,
-        success_url: `${process.env.FRONTEND_BASE_URL}/settingsAccountPage.html?checkout=success`,
-        cancel_url: `${process.env.FRONTEND_BASE_URL}/settingsAccountPage.html?checkout=cancel`,
+        success_url: buildFrontendUrl(FRONTEND_PATHS.settingsBilling, { checkout: 'success' }),
+        cancel_url: buildFrontendUrl(FRONTEND_PATHS.settingsBilling, { checkout: 'cancel' }),
     };
 
     if (promoCode) {

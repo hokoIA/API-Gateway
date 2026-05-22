@@ -9,7 +9,7 @@ const {
   getJwtCookieOptions,
   getJwtClearCookieOptions
 } = require('../config/security');
-const { FRONTEND_BASE_URL } = require('../config/urls');
+const { FRONTEND_BASE_URL, FRONTEND_PATHS, buildFrontendUrl } = require('../config/urls');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
@@ -463,7 +463,7 @@ const forgotPassword = async (req, res) => {
     );
 
     // URL do reset
-    const resetLink = `${FRONTEND_BASE_URL}/resetPassword.html?token=${token}`;
+    const resetLink = buildFrontendUrl(FRONTEND_PATHS.resetPassword, { token });
 
     // Envio de email
     const transporter = nodemailer.createTransport({
@@ -946,7 +946,7 @@ const acceptInvite = async (req, res) => {
     return res.json({
       success: true,
       message: 'Acesso ativado com sucesso.',
-      redirectTo: '/dashboardPage.html'
+      redirectTo: FRONTEND_PATHS.dashboard
     });
   } catch (err) {
     await client.query('ROLLBACK');

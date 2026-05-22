@@ -10,7 +10,29 @@ const API_PUBLIC_BASE_URL = normalizeUrl(
   process.env.API_PUBLIC_BASE_URL || 'https://api-gateway-ye0f.onrender.com'
 );
 
+/** Rotas do app Next.js (front-end), sem domínio. */
+const FRONTEND_PATHS = {
+  settingsBilling: '/configuracoes/assinatura',
+  dashboard: '/dashboard',
+  login: '/login',
+  resetPassword: '/reset-password',
+  customers: '/clientes',
+};
+
+function buildFrontendUrl(path, query = {}) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const url = new URL(`${FRONTEND_BASE_URL}${normalizedPath}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
 module.exports = {
   FRONTEND_BASE_URL,
-  API_PUBLIC_BASE_URL
+  API_PUBLIC_BASE_URL,
+  FRONTEND_PATHS,
+  buildFrontendUrl,
 };
