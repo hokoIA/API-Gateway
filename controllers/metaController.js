@@ -334,7 +334,7 @@ exports.checkMetaStatus = async (req, res) => {
 
       const r = await pool.query(
         `
-        SELECT platform, status, expires_at
+        SELECT platform, status, expires_at, resource_id, resource_name
         FROM customer_integrations
         WHERE id_customer = $1 AND platform IN ('facebook','instagram')
         `,
@@ -342,9 +342,20 @@ exports.checkMetaStatus = async (req, res) => {
       );
 
       const map = Object.fromEntries(r.rows.map(x => [x.platform, x]));
+      const facebookStatus = (map.facebook?.status || 'not_authorized').toLowerCase();
+      const instagramStatus = (map.instagram?.status || 'not_authorized').toLowerCase();
+
       return res.json({
-        facebookConnected: (map.facebook?.status || '').toLowerCase() === 'connected',
-        instagramConnected: (map.instagram?.status || '').toLowerCase() === 'connected',
+        facebookStatus,
+        instagramStatus,
+        facebookAuthorized: ['authorized', 'connected'].includes(facebookStatus),
+        instagramAuthorized: ['authorized', 'connected'].includes(instagramStatus),
+        facebookConnected: facebookStatus === 'connected',
+        instagramConnected: instagramStatus === 'connected',
+        facebookResourceId: map.facebook?.resource_id || null,
+        instagramResourceId: map.instagram?.resource_id || null,
+        facebookResourceName: map.facebook?.resource_name || null,
+        instagramResourceName: map.instagram?.resource_name || null,
         needsReauthFacebook: false,
         needsReauthInstagram: false,
         facebookDaysLeft: null,
