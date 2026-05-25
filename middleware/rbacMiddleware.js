@@ -1,15 +1,12 @@
-// Arquivo: middleware/rbacMiddleware.js
-// Resolve permissões do membro e bloqueia acesso por permission.
 const { pool } = require('../config/db');
 const { getJwtClearCookieOptions } = require('../config/security');
 
 async function ensurePermissions(req, res, next) {
   if (!req.user) {
-    res.status(401).json({ success: false, message: 'Não autenticado.' });
+    res.status(401).json({ success: false, message: 'Nao autenticado.' });
     return false;
   }
 
-  // Admin = acesso total
   if (req.user.role === 'Admin') {
     req.user.permissions = ['*'];
     if (typeof next === 'function') {
@@ -19,7 +16,6 @@ async function ensurePermissions(req, res, next) {
     return true;
   }
 
-  // Cache por request
   if (Array.isArray(req.user.permissions) && req.user.permissions.length > 0) {
     if (typeof next === 'function') {
       next();
@@ -31,7 +27,7 @@ async function ensurePermissions(req, res, next) {
   const { id_team_member, id_account, id } = req.user;
   if (!id_team_member || !id_account || !id) {
     res.clearCookie('jwt', getJwtClearCookieOptions(req));
-    res.status(401).json({ success: false, message: 'Token inválido. Faça login novamente.' });
+    res.status(401).json({ success: false, message: 'Token invalido. Faca login novamente.' });
     return false;
   }
 
@@ -60,14 +56,11 @@ async function ensurePermissions(req, res, next) {
     return true;
   } catch (err) {
     console.error('RBAC ensurePermissions error:', err);
-    res.status(500).json({ success: false, message: 'Erro ao carregar permissões.' });
+    res.status(500).json({ success: false, message: 'Erro ao carregar permissoes.' });
     return false;
   }
 }
 
-/**
- * Middleware para exigir uma permission específica (retorna JSON em caso de bloqueio).
- */
 function requirePermission(permissionCode) {
   return async (req, res, next) => {
     const ok = await ensurePermissions(req, res);
@@ -82,33 +75,13 @@ function requirePermission(permissionCode) {
 
     return res.status(403).json({
       success: false,
-      message: 'Acesso negado. Permissão insuficiente.',
+      message: 'Acesso negado. Permissao insuficiente.',
       required: permissionCode
     });
   };
 }
 
-/**
- * Middleware para páginas HTML (redireciona ao invés de JSON).
- */
-function requirePagePermission(permissionCode, redirectTo = '/dashboardPage.html') {
-  return async (req, res, next) => {
-    const ok = await ensurePermissions(req, res);
-    if (!ok) return;
-
-    if (req.user.role === 'Admin') return next();
-
-    const perms = req.user.permissions || [];
-    if (perms.includes(permissionCode) || perms.includes('*')) {
-      return next();
-    }
-
-    return res.redirect(redirectTo);
-  };
-}
-
 module.exports = {
   ensurePermissions,
-  requirePermission,
-  requirePagePermission
+  requirePermission
 };

@@ -42,7 +42,7 @@ exports.startOAuth = (req, res) => {
 // 2) Callback do OAuth
 exports.handleOAuthCallback = async (req, res) => {
     const { code, state, error, error_description } = req.query;
-    if (error) return res.redirect(`/platformsPage.html?li_error=${encodeURIComponent(error_description || error)}`);
+    if (error) return res.redirect(`${FRONTEND_URL}/clientes?li_error=${encodeURIComponent(error_description || error)}`);
     const payload = JSON.parse(
         Buffer.from(state, 'base64').toString('utf8')
     );

@@ -7,7 +7,7 @@ const FRONTEND_BASE_URL = normalizeUrl(
 );
 
 const API_PUBLIC_BASE_URL = normalizeUrl(
-  process.env.API_PUBLIC_BASE_URL || 'https://api-gateway-ye0f.onrender.com'
+  process.env.API_PUBLIC_BASE_URL || FRONTEND_BASE_URL
 );
 
 /** Rotas do app Next.js (front-end), sem domínio. */
@@ -17,6 +17,8 @@ const FRONTEND_PATHS = {
   login: '/login',
   resetPassword: '/reset-password',
   customers: '/clientes',
+  acceptInvite: '/accept-invite',
+  clientApprovals: '/aprovacoes',
 };
 
 function buildFrontendUrl(path, query = {}) {

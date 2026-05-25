@@ -1,4 +1,5 @@
 const repo = require('../repositories/kanbanRepository');
+const { FRONTEND_PATHS, buildFrontendUrl } = require('../config/urls');
 
 const ok = (res, data) => res.status(200).json(data);
 const fail = (res, error) => res.status(400).json({ success: false, message: error?.message || 'Erro no Kanban.' });
@@ -59,7 +60,6 @@ async function getClientPortalLink(req, res) {
     const idCustomer = Number(req.params.id_customer);
     if (!idCustomer) throw new Error('id_customer inválido.');
     const { external_token, client_name } = await repo.getOrCreateClientPortalToken(req.user.id, idCustomer, req.user.id_account);
-    const base = `${req.protocol}://${req.get('host')}`;
     const slug = String(client_name || 'cliente')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -70,7 +70,9 @@ async function getClientPortalLink(req, res) {
     return ok(res, {
       success: true,
       token: external_token,
-      url: `${base}/aprovacoes/${encodeURIComponent(slug || 'cliente')}?token=${encodeURIComponent(external_token)}`
+      url: buildFrontendUrl(`${FRONTEND_PATHS.clientApprovals}/${encodeURIComponent(slug || 'cliente')}`, {
+        token: external_token
+      })
     });
   } catch (error) {
     console.error('kanbanController.getClientPortalLink:', error);

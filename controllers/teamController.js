@@ -3,10 +3,7 @@
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const transporter = require('../config/mailerConfig');
-
-function getBaseUrl() {
-  return process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
-}
+const { FRONTEND_PATHS, buildFrontendUrl } = require('../config/urls');
 
 async function getRoleIdByName(id_account, roleName) {
   const r = await pool.query(
@@ -153,7 +150,7 @@ exports.inviteMember = async (req, res) => {
       [id_account, normalizedEmail, tokenHash, expiresAt, id_user]
     );
 
-    const inviteLink = `${getBaseUrl()}/acceptInvite.html?token=${rawToken}`;
+    const inviteLink = buildFrontendUrl(FRONTEND_PATHS.acceptInvite, { token: rawToken });
 
     await transporter.sendMail({
       from: process.env.MAIL_FROM,
@@ -209,7 +206,7 @@ exports.resendInvite = async (req, res) => {
       [tokenHash, expiresAt, id_user, id_invite, id_account]
     );
 
-    const inviteLink = `${getBaseUrl()}/acceptInvite.html?token=${rawToken}`;
+    const inviteLink = buildFrontendUrl(FRONTEND_PATHS.acceptInvite, { token: rawToken });
 
     await transporter.sendMail({
       from: process.env.MAIL_FROM,

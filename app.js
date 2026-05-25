@@ -1,9 +1,7 @@
-// Arquivo: app.js
 const cors = require('cors');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
-const path = require('path');
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -23,52 +21,38 @@ const metaRoutes = require('./routes/metaRoutes');
 const youtubeRoutes = require('./routes/youtubeRoutes');
 const rbacRoutes = require('./routes/rbacRoutes');
 const teamRoutes = require('./routes/teamRoutes');
-const { authenticatePageAccess } = require('./middleware/authMiddleware');
-const { requirePagePermission } = require('./middleware/rbacMiddleware');
 const { getCorsAllowedOrigins } = require('./config/security');
 
-const landingDir = path.join(__dirname, 'public', 'institutional', 'out');
-
 const app = express();
-
 const allowedOrigins = getCorsAllowedOrigins();
+const port = process.env.PORT || 3000;
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Permite requests sem Origin (Postman, server-to-server, etc.)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    return callback(new Error(`Origin não permitida: ${origin}`));
+    return callback(new Error(`Origin nao permitida: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook); // <-- RAW! :contentReference[oaicite:20]{index=20}
-const port = process.env.PORT || 3000;
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
 
-
-// Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Arquivos estáticos
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
-
-// === Rotas da API ===
-app.use('/api', authRoutes); // Não deve ser /api
+app.use('/api', authRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/contents', contentsRoutes);
 app.use('/api/kanban', kanbanRoutes);
-
-//Refatorado
 app.use('/api/contact', contactRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/googleAnalytics', googleAnalyticsRoutes);
@@ -79,69 +63,23 @@ app.use('/api/rbac', rbacRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/customer', customerRoutes);
 
-// Institucional
-app.use('/', express.static(landingDir, {
-  redirect: true,         // permite /sobre -> redireciona para /sobre/
-  maxAge: '7d',
-  setHeaders: (res, filePath) => {
-    // Evitar cache em HTML pra facilitar atualizações
-    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
-  }
-}));
 app.get('/', (req, res) => {
-  res.sendFile(path.join(landingDir, 'index.html'));
-});
-
-// === Páginas protegidas ===
-app.get('/analyzesPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'analyzesPage.html')); });
-//app.get('/chatPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'chatPage.html')); });
-app.get('/dashboardPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'dashboardPage.html')); });
-app.get('/platformsPage.html', authenticatePageAccess, requirePagePermission('page:platforms:view'), (req, res) => { res.sendFile(path.join(__dirname, 'public', 'platformsPage.html')); });
-app.get('/foodModelPage.html', authenticatePageAccess, requirePagePermission('page:food_model:view'), (req, res) => { res.sendFile(path.join(__dirname, 'public', 'foodModelPage.html')); });
-app.get('/goalsPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'goalsPage.html')); });
-app.get('/kanbanPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'kanbanPage.html')); });
-app.get('/myCustomersPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'myCustomersPage.html')); });
-app.get('/teamPage.html', authenticatePageAccess, (req, res) => { res.sendFile(path.join(__dirname, 'public', 'teamPage.html')); });
-app.get('/settingsAccountPage.html', authenticatePageAccess, requirePagePermission('page:settings:view'), (req, res) => { res.sendFile(path.join(__dirname, 'public', 'settingsAccountPage.html')); });
-
-// === Páginas públicas ===
-app.get('/login.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'login.html')); });
-app.get('/forgotPassword.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'forgotPassword.html')); });
-app.get('/resetPassword.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'resetPassword.html')); });
-app.get('/register.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'register.html')); });
-app.get('/privacyPolicyPage.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'privacyPolicyPage.html')); });
-app.get('/termsUse.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'termsUse.html')); });
-app.get("/aprovacoes/:cliente", (req, res, next) => { res.sendFile(path.join(__dirname, 'public', 'externoPage.html')); });
-app.get('/acceptInvite.html', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'acceptInvite.html')); });
-// === Área do usuário com ID ===
-app.get('/:userId', authenticatePageAccess, (req, res, next) => {
-  const userId = req.params.userId;
-
-  // Evita colisão com arquivos .html e rotas inválidas
-  if (!/^\d+$/.test(userId)) return next(); // pula para o próximo middleware (404 ou outras rotas)
-
-  // Verificar se o userId corresponde ao usuário logado
-  if (req.user && req.user.id.toString() === userId) res.sendFile(path.join(__dirname, 'public', 'dashboardPage.html'));
-  else {
-    res.status(403).json({
-      success: false,
-      message: 'Acesso negado. Você não tem permissão para acessar esta área.'
-    });
-  }
-});
-
-// === Middleware para capturar rotas não encontradas ===
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Página não encontrada'
+  res.json({
+    success: true,
+    service: 'api-gateway'
   });
 });
 
-// === Inicialização do servidor ===
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Rota nao encontrada'
+  });
+});
+
 app.listen(port, async () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
-  await testConnection(); // Verifica conexão com o banco ao iniciar
+  await testConnection();
 });
 
 module.exports = app;

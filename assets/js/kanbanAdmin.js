@@ -1,1 +1,0 @@
-window.KanbanAdmin = window.KanbanAdmin || {};
