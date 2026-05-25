@@ -26,6 +26,10 @@ async function runReport(google, startDate, endDate, dimensions, metrics) {
   return data;
 }
 
+function isOrganicChannelGroup(group) {
+  return String(group || '').toLowerCase().startsWith('organic ');
+}
+
 exports.getImpressions = async (google, startDate, endDate) => {
   const allDates = getAllDaysBetween(startDate, endDate);
   const response = await runReport(
@@ -95,7 +99,7 @@ exports.getSearchVolumeData = async (google, startDate, endDate) => {
     const date = row.dimensionValues[1].value;
     const sessions = Number(row.metricValues[0].value);
 
-    if (group === 'Organic Search') {
+    if (isOrganicChannelGroup(group)) {
       organicSessionsPerDay[date] = (organicSessionsPerDay[date] || 0) + sessions;
       totalOrganicSearch += sessions;
     } else {
