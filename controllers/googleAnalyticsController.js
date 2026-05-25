@@ -188,6 +188,8 @@ exports.connectProperty = async (req, res) => {
         const { id_customer, resource_id, resource_name } = req.body;
         if (!id_customer || !resource_id) return res.status(400).json({ success: false, message: 'id_customer e resource_id são obrigatórios' });
 
+        await processCustomerMetricsPlatform(id_customer, 'google_analytics', { resource_id });
+
         await pool.query(
             `
                 UPDATE customer_integrations
@@ -196,8 +198,6 @@ exports.connectProperty = async (req, res) => {
             `,
             [resource_id, resource_name || null, id_customer]
         );
-
-        await processCustomerMetricsPlatform(id_customer, 'google_analytics');
 
         return res.json({ success: true });
     } catch (error) {

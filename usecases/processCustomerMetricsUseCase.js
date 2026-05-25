@@ -65,7 +65,7 @@ async function processCustomerMetrics(id_user, id_customer, platforms, google, l
     await Promise.all(jobs);
 }
 
-async function processCustomerMetricsPlatform(id_customer, platform) {
+async function processCustomerMetricsPlatform(id_customer, platform, selectedResource = null) {
     const now = new Date();
     const start = new Date(now.getFullYear(), 0, 1);
     const since = start;
@@ -79,7 +79,7 @@ async function processCustomerMetricsPlatform(id_customer, platform) {
         [id_customer, platform]
     );
 
-    const integ = rows[0];
+    const integ = { ...(rows[0] || {}), ...(selectedResource || {}) };
     if (!integ || !integ.resource_id) return;
 
     const token = integ.resource_access_token || integ.access_token;

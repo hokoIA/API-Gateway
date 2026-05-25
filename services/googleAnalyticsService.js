@@ -1,34 +1,43 @@
 //Arquivo: services/googleAnalyticsService.js
-const { BetaAnalyticsDataClient } = require('@google-analytics/data');
+const axios = require('axios');
 const { formatDate, getAllDaysBetween } = require('../utils/dateUtils');
 
-exports.getImpressions = async (google, startDate, endDate) => {
-  const client = new BetaAnalyticsDataClient();
-  const allDates = getAllDaysBetween(startDate, endDate);
+async function runReport(google, startDate, endDate, dimensions, metrics) {
   const propertyId = String(google.property_id).replace(/^properties\//, '');
+  const { data } = await axios.post(
+    `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+    {
+      dimensions: dimensions.map(name => ({ name })),
+      metrics: metrics.map(name => ({ name })),
+      dateRanges: [
+        {
+          startDate: formatDate(startDate),
+          endDate: formatDate(endDate),
+        }
+      ],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${google.access_token}`,
+      },
+    }
+  );
 
-  const [response] = await client.runReport({
-    property: `properties/${propertyId}`,
-    dimensions: [
-      {
-        name: 'date'
-      }
-    ],
-    metrics: [
-      {
-        name: 'sessions'
-      }
-    ],
-    dateRanges: [
-      {
-        startDate: formatDate(startDate),
-        endDate: formatDate(endDate),
-      }
-    ],
-  });
+  return data;
+}
+
+exports.getImpressions = async (google, startDate, endDate) => {
+  const allDates = getAllDaysBetween(startDate, endDate);
+  const response = await runReport(
+    google,
+    startDate,
+    endDate,
+    ['date'],
+    ['sessions']
+  );
 
   const result = {};
-  response.rows.forEach(row => {
+  (response.rows || []).forEach(row => {
     result[row.dimensionValues[0].value] = Number(row.metricValues[0].value);
   });
 
@@ -36,37 +45,19 @@ exports.getImpressions = async (google, startDate, endDate) => {
 };
 
 exports.getTrafficData = async (google, startDate, endDate) => {
-  const client = new BetaAnalyticsDataClient();
   const allDates = getAllDaysBetween(startDate, endDate);
-  const propertyId = String(google.property_id).replace(/^properties\//, '');
-
-  const [response] = await client.runReport({
-    property: `properties/${propertyId}`,
-    dimensions: [
-      {
-        name: 'sessionDefaultChannelGroup'
-      },
-      {
-        name: 'date'
-      },
-    ],
-    metrics: [
-      {
-        name: 'sessions'
-      }
-    ],
-    dateRanges: [
-      {
-        startDate: formatDate(startDate),
-        endDate: formatDate(endDate),
-      }
-    ],
-  });
+  const response = await runReport(
+    google,
+    startDate,
+    endDate,
+    ['sessionDefaultChannelGroup', 'date'],
+    ['sessions']
+  );
 
   const sessionsPerDay = {};
   const sessionsPerSource = {};
 
-  response.rows.forEach(row => {
+  (response.rows || []).forEach(row => {
     const source = row.dimensionValues[0].value;
     const date = row.dimensionValues[1].value;
     const sessions = Number(row.metricValues[0].value);
@@ -85,39 +76,21 @@ exports.getTrafficData = async (google, startDate, endDate) => {
 };
 
 exports.getSearchVolumeData = async (google, startDate, endDate) => {
-  const client = new BetaAnalyticsDataClient();
   const allDates = getAllDaysBetween(startDate, endDate);
-  const propertyId = String(google.property_id).replace(/^properties\//, '');
-
-  const [response] = await client.runReport({
-    property: `properties/${propertyId}`,
-    dimensions: [
-      {
-        name: 'sessionDefaultChannelGroup'
-      },
-      {
-        name: 'date'
-      },
-    ],
-    metrics: [
-      {
-        name: 'sessions'
-      }
-    ],
-    dateRanges: [
-      {
-        startDate: formatDate(startDate),
-        endDate: formatDate(endDate),
-      }
-    ],
-  });
+  const response = await runReport(
+    google,
+    startDate,
+    endDate,
+    ['sessionDefaultChannelGroup', 'date'],
+    ['sessions']
+  );
 
   const organicSessionsPerDay = {};
   const otherSessionsPerDay = {};
   let totalOrganicSearch = 0;
   let totalOtherSources = 0;
 
-  response.rows.forEach(row => {
+  (response.rows || []).forEach(row => {
     const group = row.dimensionValues[0].value;
     const date = row.dimensionValues[1].value;
     const sessions = Number(row.metricValues[0].value);
