@@ -12,6 +12,8 @@ router.get('/auth/callback', linkedinController.handleOAuthCallback);
 // lista organizations para o cliente
 router.get('/organizations', authenticateToken, requirePermission('platforms:connect'), requireCustomerInAccount(), linkedinController.getOrganizations);
 
+router.get('/status', authenticateToken, requireCustomerInAccount(), linkedinController.checkStatus);
+
 // conecta organization escolhida
 router.post('/connect', authenticateToken, requirePermission('platforms:connect'), requireCustomerInAccount(), linkedinController.connectOrganization);
 

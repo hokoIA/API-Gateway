@@ -116,29 +116,40 @@ exports.handleOAuthCallback = async (req, res) => {
 };
 
 
-// 3) Status para a platformsPage
+// 3) Status por cliente, sem chamar a API do LinkedIn.
 exports.checkStatus = async (req, res) => {
     try {
-        const id_user = req.user.id;
-        const { rows } = await pool.query(
-            `SELECT access_token_linkedin, refresh_token_linkedin, expires_at_linkedin FROM user_keys WHERE id_user = $1`,
-            [id_user]
+        const { id_customer } = req.query;
+        if (!id_customer) return res.status(400).json({ success: false, message: 'id_customer e obrigatorio' });
+
+        const result = await pool.query(
+            "SELECT status, expires_at, resource_id, resource_name FROM customer_integrations WHERE id_customer = $1 AND platform = 'linkedin'",
+            [id_customer]
         );
 
-        const row = rows[0] || {};
-        const linkedinConnected = !!(row.access_token_linkedin && (row.refresh_token_linkedin || row.expires_at_linkedin));
-        let linkedinDaysLeft = null, needsReauthLinkedIn = false;
+        const row = result.rows[0];
+        if (!row) return res.json({ success: true, connected: false, status: null, daysLeft: null });
 
-        if (row.expires_at_linkedin) {
-            const diff = new Date(row.expires_at_linkedin) - Date.now();
-            linkedinDaysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
-            needsReauthLinkedIn = linkedinDaysLeft <= 7;
+        let daysLeft = null;
+        if (row.expires_at) {
+            const diff = new Date(row.expires_at) - Date.now();
+            daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
         }
 
-        res.json({ linkedinConnected, linkedinDaysLeft, needsReauthLinkedIn });
+        const connected = String(row.status || '').toLowerCase() === 'connected';
+        const needsRenewal = daysLeft !== null && daysLeft <= 7;
+
+        res.json({
+            success: true,
+            connected,
+            status: needsRenewal ? 'needs_renewal' : row.status,
+            daysLeft,
+            resource_id: row.resource_id,
+            resource_name: row.resource_name
+        });
     } catch (err) {
         console.error('Erro status LinkedIn:', err);
-        res.status(500).json({ linkedinConnected: false });
+        res.status(500).json({ success: false, message: 'Erro ao verificar status do LinkedIn' });
     }
 };
 
