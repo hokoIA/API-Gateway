@@ -5,6 +5,7 @@ const { pool } = require('../config/db');
 const { checkCustomerBelongsToUser, } = require('../repositories/customerRepository');
 const { processCustomerMetricsPlatform } = require('../usecases/processCustomerMetricsUseCase');
 const { oauthConfig } = require('../config/oauth');
+const metaAdsService = require('../services/metaAdsService');
 
 const APP_ID = oauthConfig.meta.appId;
 const APP_SECRET = oauthConfig.meta.appSecret;
@@ -19,10 +20,23 @@ const SCOPES = [
   'pages_manage_metadata',
   'pages_read_user_content',
   'read_insights',
+  'ads_read',
   'instagram_basic',
   'instagram_manage_insights',
   'instagram_manage_comments',
 ];
+
+const META_ADS_PLATFORM = 'meta_ads';
+const META_ADS_SCOPE = 'ads_read';
+
+function parseScopes(raw) {
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  return String(raw || '').split(/[,\s]+/).filter(Boolean);
+}
+
+function hasMetaAdsScope(raw) {
+  return parseScopes(raw).includes(META_ADS_SCOPE);
+}
 
 function encodeState(obj) {
   return Buffer.from(JSON.stringify(obj)).toString('base64');
@@ -37,12 +51,12 @@ async function getMetaTokenForCustomer(id_customer) {
   // token é o mesmo pro Meta, então pega o primeiro que existir (facebook/instagram)
   const r = await pool.query(
     `
-    SELECT access_token, expires_at
+    SELECT access_token, expires_at, scopes
     FROM customer_integrations
     WHERE id_customer = $1
-      AND platform IN ('facebook','instagram')
+      AND platform IN ('meta_ads','facebook','instagram')
       AND access_token IS NOT NULL
-    ORDER BY CASE platform WHEN 'facebook' THEN 0 ELSE 1 END
+    ORDER BY CASE platform WHEN 'meta_ads' THEN 0 WHEN 'facebook' THEN 1 ELSE 2 END
     LIMIT 1
     `,
     [id_customer]
@@ -78,6 +92,24 @@ async function upsertAuthForCustomer({ id_customer, oauth_account_id, access_tok
       [id_customer, platform, oauth_account_id, access_token, expires_at, scopesStr]
     );
   }
+
+  await pool.query(
+    `
+    UPDATE customer_integrations
+    SET
+      oauth_account_id = $2,
+      access_token     = $3,
+      expires_at       = $4,
+      scopes           = $5,
+      status           = CASE
+                         WHEN resource_id IS NOT NULL THEN 'connected'
+                         ELSE status
+                         END,
+      updated_at       = NOW()
+    WHERE id_customer = $1 AND platform = $6
+    `,
+    [id_customer, oauth_account_id, access_token, expires_at, scopesStr, META_ADS_PLATFORM]
+  );
 }
 
 exports.startOAuth = async (req, res) => {
@@ -143,7 +175,6 @@ exports.handleOAuthCallback = async (req, res) => {
     });
 
     const longLivedToken = longRes.data.access_token;
-    const grantedScopes = (longRes.data.scope || '').split(',').filter(Boolean);
 
     // pega meta user id
     const meRes = await axios.get('https://graph.facebook.com/v19.0/me', {
@@ -161,6 +192,7 @@ exports.handleOAuthCallback = async (req, res) => {
 
     const expires_at = debugRes.data?.data?.expires_at;
     const longLivedExpiresAt = expires_at ? new Date(expires_at * 1000).toISOString() : null;
+    const grantedScopes = parseScopes(debugRes.data?.data?.scopes || longRes.data.scope);
 
     await pool.query('BEGIN');
     await upsertAuthForCustomer({
@@ -319,6 +351,234 @@ exports.connectResource = async (req, res) => {
   } catch (err) {
     console.error('connectResource error:', err);
     return res.status(500).json({ success: false, message: 'Erro ao conectar recurso Meta' });
+  }
+};
+
+exports.getMetaAdAccounts = async (req, res) => {
+  try {
+    const id_user = req.user.id;
+    const { id_customer } = req.query;
+
+    if (!id_customer) return res.status(400).json({ success: false, message: 'id_customer e obrigatorio' });
+
+    const ok = await checkCustomerBelongsToUser(id_customer, id_user);
+    if (!ok) return res.status(403).json({ success: false, message: 'Cliente nao pertence ao usuario' });
+
+    const tokenRow = await getMetaTokenForCustomer(id_customer);
+    if (!tokenRow?.access_token) {
+      return res.status(400).json({ success: false, message: 'Cliente nao possui OAuth Meta autorizado' });
+    }
+
+    if (!hasMetaAdsScope(tokenRow.scopes)) {
+      await pool.query(
+        `
+        UPDATE customer_integrations
+        SET status = 'needs_reauth'
+        WHERE id_customer = $1 AND platform IN ('facebook', 'instagram', $2)
+        `,
+        [id_customer, META_ADS_PLATFORM]
+      );
+
+      return res.status(409).json({
+        success: false,
+        code: 'missing_meta_ads_scope',
+        message: 'A conta Meta foi autorizada sem permissao ads_read. Autorize novamente para listar contas de anuncios.'
+      });
+    }
+
+    const adAccounts = await metaAdsService.listAdAccounts(tokenRow.access_token);
+    return res.json({ success: true, adAccounts });
+  } catch (err) {
+    console.error('getMetaAdAccounts error:', err.response?.data || err.message);
+    const status = err.response?.status || 500;
+    const message = err.response?.data?.error?.message || 'Erro ao listar contas de anuncios Meta';
+    return res.status(status).json({ success: false, message });
+  }
+};
+
+exports.connectMetaAdAccount = async (req, res) => {
+  try {
+    const id_user = req.user.id;
+    const {
+      id_customer,
+      resource_id,
+      resource_name,
+      currency,
+      account_status,
+      timezone_name,
+      business_name
+    } = req.body;
+
+    if (!id_customer || !resource_id) {
+      return res.status(400).json({ success: false, message: 'id_customer e resource_id sao obrigatorios' });
+    }
+
+    const ok = await checkCustomerBelongsToUser(id_customer, id_user);
+    if (!ok) return res.status(403).json({ success: false, message: 'Cliente nao pertence ao usuario' });
+
+    const tokenRow = await getMetaTokenForCustomer(id_customer);
+    if (!tokenRow?.access_token) {
+      return res.status(400).json({ success: false, message: 'Cliente nao possui OAuth Meta autorizado' });
+    }
+
+    if (!hasMetaAdsScope(tokenRow.scopes)) {
+      return res.status(409).json({
+        success: false,
+        code: 'missing_meta_ads_scope',
+        message: 'Autorize novamente com ads_read antes de conectar uma conta de anuncios.'
+      });
+    }
+
+    const normalizedAdAccountId = metaAdsService.normalizeAdAccountId(resource_id);
+
+    await pool.query(
+      `
+      INSERT INTO customer_integrations
+        (
+          id_customer, platform, access_token, expires_at, scopes,
+          resource_id, resource_name, resource_type, status, meta
+        )
+      VALUES
+        ($1, $2, $3, $4, $5, $6, $7, 'meta_ad_account', 'connected', $8::jsonb)
+      ON CONFLICT (id_customer, platform)
+      DO UPDATE SET
+        access_token = EXCLUDED.access_token,
+        expires_at = EXCLUDED.expires_at,
+        scopes = EXCLUDED.scopes,
+        resource_id = EXCLUDED.resource_id,
+        resource_name = EXCLUDED.resource_name,
+        resource_type = 'meta_ad_account',
+        status = 'connected',
+        meta = EXCLUDED.meta,
+        updated_at = NOW()
+      `,
+      [
+        id_customer,
+        META_ADS_PLATFORM,
+        tokenRow.access_token,
+        tokenRow.expires_at || null,
+        tokenRow.scopes || null,
+        normalizedAdAccountId,
+        resource_name || normalizedAdAccountId,
+        JSON.stringify({
+          currency: currency || null,
+          account_status: account_status ?? null,
+          timezone_name: timezone_name || null,
+          business_name: business_name || null
+        })
+      ]
+    );
+
+    return res.json({ success: true, resource_id: normalizedAdAccountId });
+  } catch (err) {
+    console.error('connectMetaAdAccount error:', err);
+    return res.status(500).json({ success: false, message: 'Erro ao conectar conta de anuncios Meta' });
+  }
+};
+
+exports.getMetaAdsStatus = async (req, res) => {
+  try {
+    const id_user = req.user.id;
+    const { id_customer } = req.query;
+
+    if (!id_customer) return res.status(400).json({ success: false, message: 'id_customer e obrigatorio' });
+
+    const ok = await checkCustomerBelongsToUser(id_customer, id_user);
+    if (!ok) return res.status(403).json({ success: false, message: 'Cliente nao pertence ao usuario' });
+
+    const result = await pool.query(
+      `
+      SELECT status, expires_at, scopes, resource_id, resource_name, meta
+      FROM customer_integrations
+      WHERE id_customer = $1 AND platform = $2
+      LIMIT 1
+      `,
+      [id_customer, META_ADS_PLATFORM]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      const metaToken = await getMetaTokenForCustomer(id_customer);
+      return res.json({
+        success: true,
+        connected: false,
+        status: metaToken?.access_token ? 'authorized' : 'not_authorized',
+        requires_reauth: metaToken?.access_token ? !hasMetaAdsScope(metaToken.scopes) : false,
+        resource_id: null,
+        resource_name: null,
+        meta: {}
+      });
+    }
+
+    const requiresReauth = !hasMetaAdsScope(row.scopes);
+    return res.json({
+      success: true,
+      connected: String(row.status || '').toLowerCase() === 'connected' && !requiresReauth,
+      status: requiresReauth ? 'needs_reauth' : row.status,
+      requires_reauth: requiresReauth,
+      resource_id: row.resource_id,
+      resource_name: row.resource_name,
+      meta: row.meta || {}
+    });
+  } catch (err) {
+    console.error('getMetaAdsStatus error:', err);
+    return res.status(500).json({ success: false, message: 'Erro ao verificar status do Meta Ads' });
+  }
+};
+
+exports.getMetaAdsInsights = async (req, res) => {
+  try {
+    const id_user = req.user.id;
+    const { id_customer, startDate, endDate } = req.body;
+
+    if (!id_customer || !startDate || !endDate) {
+      return res.status(400).json({ success: false, message: 'id_customer, startDate e endDate sao obrigatorios' });
+    }
+
+    const ok = await checkCustomerBelongsToUser(id_customer, id_user);
+    if (!ok) return res.status(403).json({ success: false, message: 'Cliente nao pertence ao usuario' });
+
+    const result = await pool.query(
+      `
+      SELECT access_token, scopes, resource_id, resource_name, meta
+      FROM customer_integrations
+      WHERE id_customer = $1 AND platform = $2
+      LIMIT 1
+      `,
+      [id_customer, META_ADS_PLATFORM]
+    );
+
+    const row = result.rows[0];
+    if (!row?.resource_id || !row?.access_token) {
+      return res.status(400).json({ success: false, message: 'Cliente nao possui conta Meta Ads conectada' });
+    }
+
+    if (!hasMetaAdsScope(row.scopes)) {
+      return res.status(409).json({
+        success: false,
+        code: 'missing_meta_ads_scope',
+        message: 'Autorize novamente com ads_read para carregar dados de Meta Ads.'
+      });
+    }
+
+    const insights = await metaAdsService.getMetaAdsInsights(row.resource_id, row.access_token, startDate, endDate);
+
+    return res.json({
+      success: true,
+      platform: META_ADS_PLATFORM,
+      resource: {
+        id: row.resource_id,
+        name: row.resource_name,
+        meta: row.meta || {}
+      },
+      period: { startDate, endDate },
+      ...insights
+    });
+  } catch (err) {
+    console.error('getMetaAdsInsights error:', err.response?.data || err.message);
+    const status = err.response?.status || 500;
+    const message = err.response?.data?.error?.message || 'Erro ao buscar dados de Meta Ads';
+    return res.status(status).json({ success: false, message });
   }
 };
 
