@@ -38,6 +38,35 @@ function hasMetaAdsScope(raw) {
   return parseScopes(raw).includes(META_ADS_SCOPE);
 }
 
+function normalizePeriodInput(body = {}) {
+  const startDate = body.startDate || body.date_start || body.start_date;
+  const endDate = body.endDate || body.date_end || body.end_date;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (!startDate || !endDate) {
+    return {
+      error: 'id_customer, startDate e endDate sao obrigatorios'
+    };
+  }
+
+  if (!datePattern.test(String(startDate)) || !datePattern.test(String(endDate))) {
+    return {
+      error: 'startDate e endDate devem estar no formato YYYY-MM-DD'
+    };
+  }
+
+  if (String(startDate) > String(endDate)) {
+    return {
+      error: 'startDate nao pode ser posterior a endDate'
+    };
+  }
+
+  return {
+    startDate: String(startDate),
+    endDate: String(endDate)
+  };
+}
+
 function encodeState(obj) {
   return Buffer.from(JSON.stringify(obj)).toString('base64');
 }
@@ -529,10 +558,15 @@ exports.getMetaAdsStatus = async (req, res) => {
 exports.getMetaAdsInsights = async (req, res) => {
   try {
     const id_user = req.user.id;
-    const { id_customer, startDate, endDate } = req.body;
+    const { id_customer } = req.body;
+    const period = normalizePeriodInput(req.body);
 
-    if (!id_customer || !startDate || !endDate) {
-      return res.status(400).json({ success: false, message: 'id_customer, startDate e endDate sao obrigatorios' });
+    if (!id_customer || period.error) {
+      return res.status(400).json({
+        success: false,
+        code: 'invalid_meta_ads_period',
+        message: period.error || 'id_customer e obrigatorio'
+      });
     }
 
     const ok = await checkCustomerBelongsToUser(id_customer, id_user);
@@ -561,7 +595,12 @@ exports.getMetaAdsInsights = async (req, res) => {
       });
     }
 
-    const insights = await metaAdsService.getMetaAdsInsights(row.resource_id, row.access_token, startDate, endDate);
+    const insights = await metaAdsService.getMetaAdsInsights(
+      row.resource_id,
+      row.access_token,
+      period.startDate,
+      period.endDate
+    );
 
     return res.json({
       success: true,
@@ -571,7 +610,7 @@ exports.getMetaAdsInsights = async (req, res) => {
         name: row.resource_name,
         meta: row.meta || {}
       },
-      period: { startDate, endDate },
+      period,
       ...insights
     });
   } catch (err) {

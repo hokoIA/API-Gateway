@@ -24,6 +24,34 @@ const INSIGHTS_FIELDS = [
   'website_purchase_roas'
 ].join(',');
 
+const LEVEL_FIELD_MAP = {
+  campaign: [
+    'investment',
+    'impressions',
+    'reach',
+    'frequency',
+    'cpm',
+    'objective',
+    'conversationsStarted',
+    'roas',
+    'costPerLead'
+  ],
+  adSet: [
+    'investment',
+    'reach',
+    'frequency',
+    'cpm',
+    'ctr'
+  ],
+  ad: [
+    'impressions',
+    'ctr',
+    'cpc',
+    'cpm',
+    'costPerLead'
+  ]
+};
+
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -46,7 +74,7 @@ function isLeadAction(actionType) {
 
 function isConversationAction(actionType) {
   const t = String(actionType || '').toLowerCase();
-  return t.includes('messaging') || t.includes('conversation');
+  return t.includes('messaging') || t.includes('conversation') || t.includes('onsite_conversion.messaging');
 }
 
 function isPurchaseAction(actionType) {
@@ -76,6 +104,14 @@ function getCostPerAction(row, predicate) {
   if (!Array.isArray(row.cost_per_action_type)) return 0;
   const item = row.cost_per_action_type.find((entry) => predicate(entry.action_type));
   return item ? toNumber(item.value) : 0;
+}
+
+function firstPositiveCostPerAction(row, predicates) {
+  for (const predicate of predicates) {
+    const value = getCostPerAction(row, predicate);
+    if (value > 0) return value;
+  }
+  return 0;
 }
 
 async function fetchAll(url, params) {
@@ -137,6 +173,7 @@ function normalizeCampaignRow(row, objectivesByCampaignId = {}) {
   const spend = toNumber(row.spend);
   const conversationsStarted = sumActionValues(row.actions, isConversationAction);
   const leads = sumActionValues(row.actions, isLeadAction);
+  const primaryActions = leads || conversationsStarted;
   const purchaseValue = sumActionValues(row.action_values, isPurchaseAction);
   const roas = firstRoasValue(row) || (spend > 0 && purchaseValue > 0 ? purchaseValue / spend : 0);
 
@@ -152,7 +189,9 @@ function normalizeCampaignRow(row, objectivesByCampaignId = {}) {
     conversationsStarted,
     leads,
     roas,
-    costPerLead: getCostPerAction(row, isLeadAction) || (leads > 0 ? spend / leads : 0)
+    costPerLead:
+      firstPositiveCostPerAction(row, [isLeadAction, isConversationAction]) ||
+      (primaryActions > 0 ? spend / primaryActions : 0)
   };
 }
 
@@ -173,6 +212,8 @@ function normalizeAdSetRow(row) {
 function normalizeAdRow(row) {
   const spend = toNumber(row.spend);
   const leads = sumActionValues(row.actions, isLeadAction);
+  const conversationsStarted = sumActionValues(row.actions, isConversationAction);
+  const primaryActions = leads || conversationsStarted;
 
   return {
     id: row.ad_id,
@@ -186,7 +227,10 @@ function normalizeAdRow(row) {
     cpc: toNumber(row.cpc),
     cpm: toNumber(row.cpm),
     leads,
-    costPerLead: getCostPerAction(row, isLeadAction) || (leads > 0 ? spend / leads : 0)
+    conversationsStarted,
+    costPerLead:
+      firstPositiveCostPerAction(row, [isLeadAction, isConversationAction]) ||
+      (primaryActions > 0 ? spend / primaryActions : 0)
   };
 }
 
@@ -205,7 +249,7 @@ function summarize(campaigns) {
     conversationsStarted,
     leads,
     roas: investment > 0 ? revenue / investment : 0,
-    costPerLead: leads > 0 ? investment / leads : 0
+    costPerLead: (leads || conversationsStarted) > 0 ? investment / (leads || conversationsStarted) : 0
   };
 }
 
@@ -222,6 +266,10 @@ async function getMetaAdsInsights(adAccountId, accessToken, startDate, endDate) 
   const ads = adRows.map(normalizeAdRow);
 
   return {
+    source: 'meta_ads',
+    adAccountId: normalizeAdAccountId(adAccountId),
+    fetchedAt: new Date().toISOString(),
+    fields: LEVEL_FIELD_MAP,
     summary: summarize(campaigns),
     campaign: campaigns,
     adSet: adSets,
