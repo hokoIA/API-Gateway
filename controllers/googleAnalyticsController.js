@@ -219,6 +219,21 @@ exports.checkStatus = async (req, res) => {
         const row = result.rows[0];
         if (!row) return res.json({ success: true, connected: false, status: null, daysLeft: null });
 
+        const rawStatus = String(row.status || '').toLowerCase();
+        const hasResource = Boolean(row.resource_id);
+
+        if (rawStatus === 'not_authorized' || rawStatus === 'disconnected' || !hasResource) {
+            return res.json({
+                success: true,
+                connected: false,
+                status: 'disconnected',
+                daysLeft: null,
+                resource_id: row.resource_id,
+                resource_name: row.resource_name,
+                requires_reauth: false
+            });
+        }
+
         const missingAnalyticsScope = !hasRequiredAnalyticsScope(row.scopes);
         const status = missingAnalyticsScope ? 'needs_reauth' : row.status;
         const daysLeft = row.expires_at ? Math.ceil((new Date(row.expires_at) - Date.now()) / (1000 * 60 * 60 * 24)) : null;

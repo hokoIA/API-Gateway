@@ -227,6 +227,28 @@ const removeCustomerPlatformAuth = async (id_customer, platform) => {
     else if (platform === 'google_analytics') await client.query('DELETE FROM google_analytics WHERE id_customer = $1', [id_customer]);
     else if (platform === 'youtube') await client.query('DELETE FROM youtube WHERE id_customer = $1', [id_customer]);
 
+    if (platform === 'facebook') {
+      await client.query(
+        'UPDATE customer SET id_facebook_page = NULL, access_token_page_facebook = NULL, updated_at = NOW() WHERE id_customer = $1',
+        [id_customer]
+      );
+    } else if (platform === 'instagram') {
+      await client.query(
+        'UPDATE customer SET id_instagram_page = NULL, access_token_page_instagram = NULL, updated_at = NOW() WHERE id_customer = $1',
+        [id_customer]
+      );
+    } else if (platform === 'linkedin') {
+      await client.query(
+        'UPDATE customer SET id_linkedin_organization = NULL, updated_at = NOW() WHERE id_customer = $1',
+        [id_customer]
+      );
+    } else {
+      await client.query(
+        'UPDATE customer SET updated_at = NOW() WHERE id_customer = $1',
+        [id_customer]
+      );
+    }
+
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');

@@ -329,6 +329,19 @@ exports.checkStatus = async (req, res) => {
     }
 
     const hasResource = Boolean(row.resource_id);
+    const rawStatus = String(row.status || '').toLowerCase();
+    if (rawStatus === 'not_authorized' || rawStatus === 'disconnected') {
+      return res.json({
+        success: true,
+        connected: false,
+        status: 'disconnected',
+        requires_reauth: false,
+        resource_id: null,
+        resource_name: null,
+        meta: row.meta || {}
+      });
+    }
+
     const missingScope = !hasGoogleAdsScope(row.scopes);
     const requiresReauth =
       missingScope || String(row.status).toLowerCase() === 'needs_reauth';
