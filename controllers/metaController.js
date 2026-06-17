@@ -94,7 +94,14 @@ async function getMetaTokenForCustomer(id_customer) {
   return r.rows[0] || null;
 }
 
-async function upsertAuthForCustomer({ id_customer, oauth_account_id, access_token, expires_at, scopes }) {
+async function upsertAuthForCustomer({
+  id_customer,
+  oauth_account_id,
+  access_token,
+  expires_at,
+  scopes,
+  requested_platform
+}) {
   const scopesStr = Array.isArray(scopes) ? scopes.join(',') : (scopes || null);
 
   // grava/atualiza facebook e instagram juntos (exigência do seu fluxo)
@@ -122,6 +129,43 @@ async function upsertAuthForCustomer({ id_customer, oauth_account_id, access_tok
     );
   }
 
+  const metaAdsAuthStatus = hasMetaAdsScope(scopes)
+    ? 'authorized'
+    : 'needs_reauth';
+
+  if (requested_platform === META_ADS_PLATFORM) {
+    await pool.query(
+      `
+      INSERT INTO customer_integrations
+        (id_customer, platform, oauth_account_id, access_token, expires_at, scopes, status)
+      VALUES
+        ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (id_customer, platform)
+      DO UPDATE SET
+        oauth_account_id = EXCLUDED.oauth_account_id,
+        access_token     = EXCLUDED.access_token,
+        expires_at       = EXCLUDED.expires_at,
+        scopes           = EXCLUDED.scopes,
+        status           = CASE
+                           WHEN EXCLUDED.status = 'needs_reauth' THEN 'needs_reauth'
+                           WHEN customer_integrations.resource_id IS NOT NULL THEN 'connected'
+                           ELSE 'authorized'
+                           END,
+        updated_at       = NOW()
+      `,
+      [
+        id_customer,
+        META_ADS_PLATFORM,
+        oauth_account_id,
+        access_token,
+        expires_at,
+        scopesStr,
+        metaAdsAuthStatus
+      ]
+    );
+    return;
+  }
+
   await pool.query(
     `
     UPDATE customer_integrations
@@ -131,13 +175,22 @@ async function upsertAuthForCustomer({ id_customer, oauth_account_id, access_tok
       expires_at       = $4,
       scopes           = $5,
       status           = CASE
+                         WHEN $7 = 'needs_reauth' THEN 'needs_reauth'
                          WHEN resource_id IS NOT NULL THEN 'connected'
-                         ELSE status
+                         ELSE 'authorized'
                          END,
       updated_at       = NOW()
     WHERE id_customer = $1 AND platform = $6
     `,
-    [id_customer, oauth_account_id, access_token, expires_at, scopesStr, META_ADS_PLATFORM]
+    [
+      id_customer,
+      oauth_account_id,
+      access_token,
+      expires_at,
+      scopesStr,
+      META_ADS_PLATFORM,
+      metaAdsAuthStatus
+    ]
   );
 }
 
@@ -145,6 +198,10 @@ exports.startOAuth = async (req, res) => {
   try {
     const id_user = req.user.id;
     const { id_customer } = req.query;
+    const requestedPlatform =
+      String(req.query.platform || '').trim().toLowerCase() === META_ADS_PLATFORM
+        ? META_ADS_PLATFORM
+        : null;
 
     if (!id_customer) {
       return res.status(400).send('id_customer é obrigatório');
@@ -153,7 +210,11 @@ exports.startOAuth = async (req, res) => {
     const ok = await checkCustomerBelongsToUser(id_customer, id_user);
     if (!ok) return res.status(403).send('Cliente não pertence ao usuário');
 
-    const state = encodeState({ id_user, id_customer });
+    const state = encodeState({
+      id_user,
+      id_customer,
+      requested_platform: requestedPlatform
+    });
 
     const params = querystring.stringify({
       client_id: APP_ID,
@@ -175,7 +236,7 @@ exports.handleOAuthCallback = async (req, res) => {
     const { code, state } = req.query;
     if (!code || !state) return res.status(400).send('Code/state ausentes');
 
-    const { id_user, id_customer } = decodeState(state);
+    const { id_user, id_customer, requested_platform } = decodeState(state);
 
     // segurança: garante que o cliente é do usuário
     const ok = await checkCustomerBelongsToUser(id_customer, id_user);
@@ -230,6 +291,7 @@ exports.handleOAuthCallback = async (req, res) => {
       access_token: longLivedToken,
       expires_at: longLivedExpiresAt,
       scopes: grantedScopes,
+      requested_platform,
     });
     await pool.query('COMMIT');
 
@@ -508,7 +570,7 @@ exports.getMetaAdsStatus = async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT status, expires_at, scopes, resource_id, resource_name, meta
+      SELECT status, access_token, expires_at, scopes, resource_id, resource_name, meta
       FROM customer_integrations
       WHERE id_customer = $1 AND platform = $2
       LIMIT 1
@@ -530,14 +592,19 @@ exports.getMetaAdsStatus = async (req, res) => {
     }
 
     const hasResource = Boolean(row.resource_id);
-    const requiresReauth = hasResource && !hasMetaAdsScope(row.scopes);
+    const hasAuth = Boolean(row.access_token);
+    const requiresReauth = hasAuth && !hasMetaAdsScope(row.scopes);
 
     if (!hasResource) {
       return res.json({
         success: true,
         connected: false,
-        status: 'disconnected',
-        requires_reauth: false,
+        status: requiresReauth
+          ? 'needs_reauth'
+          : hasAuth
+            ? 'authorized'
+            : 'disconnected',
+        requires_reauth: requiresReauth,
         resource_id: null,
         resource_name: null,
         meta: row.meta || {}
