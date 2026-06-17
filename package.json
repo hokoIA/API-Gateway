@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --test-concurrency=1 tests/unit/metaAuthService.test.js tests/integration/metaAdsStatus.integration.test.js",
+    "test:unit": "node --test tests/unit/metaAuthService.test.js",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/metaAdsStatus.integration.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1014.0",
