@@ -10,6 +10,9 @@ const oauthConfig = {
     analyticsRedirectUri:
       process.env.GOOGLE_ANALYTICS_REDIRECT_URI ||
       `${API_PUBLIC_BASE_URL}/api/googleAnalytics/auth/callback`,
+    adsRedirectUri:
+      process.env.GOOGLE_ADS_REDIRECT_URI ||
+      `${API_PUBLIC_BASE_URL}/api/googleAds/auth/callback`,
     youtubeRedirectUri:
       process.env.YOUTUBE_REDIRECT_URI ||
       `${API_PUBLIC_BASE_URL}/api/youtube/auth/callback`

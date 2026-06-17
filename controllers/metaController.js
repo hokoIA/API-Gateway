@@ -399,15 +399,6 @@ exports.getMetaAdAccounts = async (req, res) => {
     }
 
     if (!hasMetaAdsScope(tokenRow.scopes)) {
-      await pool.query(
-        `
-        UPDATE customer_integrations
-        SET status = 'needs_reauth'
-        WHERE id_customer = $1 AND platform IN ('facebook', 'instagram', $2)
-        `,
-        [id_customer, META_ADS_PLATFORM]
-      );
-
       return res.status(409).json({
         success: false,
         code: 'missing_meta_ads_scope',
@@ -527,19 +518,32 @@ exports.getMetaAdsStatus = async (req, res) => {
 
     const row = result.rows[0];
     if (!row) {
-      const metaToken = await getMetaTokenForCustomer(id_customer);
       return res.json({
         success: true,
         connected: false,
-        status: metaToken?.access_token ? 'authorized' : 'not_authorized',
-        requires_reauth: metaToken?.access_token ? !hasMetaAdsScope(metaToken.scopes) : false,
+        status: 'disconnected',
+        requires_reauth: false,
         resource_id: null,
         resource_name: null,
         meta: {}
       });
     }
 
-    const requiresReauth = !hasMetaAdsScope(row.scopes);
+    const hasResource = Boolean(row.resource_id);
+    const requiresReauth = hasResource && !hasMetaAdsScope(row.scopes);
+
+    if (!hasResource) {
+      return res.json({
+        success: true,
+        connected: false,
+        status: 'disconnected',
+        requires_reauth: false,
+        resource_id: null,
+        resource_name: null,
+        meta: row.meta || {}
+      });
+    }
+
     return res.json({
       success: true,
       connected: String(row.status || '').toLowerCase() === 'connected' && !requiresReauth,

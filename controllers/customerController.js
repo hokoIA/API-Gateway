@@ -205,7 +205,15 @@ const removePlatformCustomerById = async (req, res) => {
     const id_customer = req.params.id_customer;
     const platform = (req.params.platform || '').toLowerCase();
 
-    const allowed = ['facebook', 'instagram', 'linkedin', 'google_analytics', 'youtube'];
+    const allowed = [
+      'facebook',
+      'instagram',
+      'meta_ads',
+      'google_ads',
+      'linkedin',
+      'google_analytics',
+      'youtube'
+    ];
     if (!allowed.includes(platform)) return res.status(400).json({ success: false, message: 'Plataforma inválida' });
 
     const belongs = await checkCustomerBelongsToUser(id_customer, id_user);
