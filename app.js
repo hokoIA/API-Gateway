@@ -9,6 +9,7 @@ const { handleStripeWebhook } = require('./controllers/stripeWebhookController')
 const billingRoutes = require('./routes/billingRoutes');
 const { testConnection } = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
+const analyzeRoutes = require('./routes/analyzeRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const contentsRoutes = require('./routes/contentsRoutes');
 const customerRoutes = require('./routes/customerRoutes');
@@ -50,6 +51,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 app.use('/api', authRoutes);
+app.use('/api/analyze', analyzeRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/contents', contentsRoutes);

@@ -3,9 +3,10 @@ const axios = require('axios');
 const querystring = require('querystring');
 const { pool } = require('../config/db');
 const { checkCustomerBelongsToUser, } = require('../repositories/customerRepository');
-const { processCustomerMetricsPlatform } = require('../usecases/processCustomerMetricsUseCase');
 const { oauthConfig } = require('../config/oauth');
 const metaAdsService = require('../services/metaAdsService');
+const { schedulePlatformSync } = require('../services/platformSyncScheduler');
+const { toSafeError } = require('../utils/safeError');
 const {
   META_ADS_PLATFORM,
   buildMetaAdsStatus,
@@ -123,7 +124,7 @@ exports.startOAuth = async (req, res) => {
 
     return res.redirect(`https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`);
   } catch (err) {
-    console.error('startOAuth error:', err);
+    console.error('startOAuth error:', toSafeError(err));
     return res.status(500).send('Erro ao iniciar OAuth Meta');
   }
 };
@@ -203,7 +204,7 @@ exports.handleOAuthCallback = async (req, res) => {
     // volta pro acordeão do cliente (platformsPage não entra mais)
     return res.redirect(`${FRONTEND_URL}/clientes?open=${encodeURIComponent(id_customer)}`);
   } catch (err) {
-    console.error('handleOAuthCallback error:', err);
+    console.error('handleOAuthCallback error:', toSafeError(err));
     return res.status(500).send('Erro no callback OAuth Meta');
   }
 };
@@ -264,7 +265,7 @@ exports.getMetaPages = async (req, res) => {
 
     return res.json({ success: true, facebook, instagram });
   } catch (err) {
-    console.error('getMetaPages error:', err);
+    console.error('getMetaPages error:', toSafeError(err));
     return res.status(500).json({ success: false, message: 'Erro ao listar páginas Meta' });
   }
 };
@@ -294,57 +295,69 @@ exports.connectResource = async (req, res) => {
     const p = String(platform).toLowerCase();
     const resource_type = p === 'facebook' ? 'facebook_page' : 'instagram_business_account';
 
-    await pool.query(
-      `
-      INSERT INTO customer_integrations
-        (id_customer, platform, resource_id, resource_name, resource_type, resource_access_token, status)
-      VALUES
-        ($1, $2, $3, $4, $5, $6, 'connected')
-      ON CONFLICT (id_customer, platform)
-      DO UPDATE SET
-        resource_id           = EXCLUDED.resource_id,
-        resource_name         = EXCLUDED.resource_name,
-        resource_type         = EXCLUDED.resource_type,
-        resource_access_token = EXCLUDED.resource_access_token,
-        status                = 'connected'
-      `,
-      [id_customer, p, resource_id, resource_name || null, resource_type, resource_access_token]
-    );
-
-    if (p === 'facebook') {
-      await pool.query(
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
         `
-        UPDATE customer
-        SET
-          id_facebook_page = $1,
-          access_token_page_facebook = $2,
-          updated_at = NOW()
-        WHERE id_customer = $3
-      `,
-        [resource_id, resource_access_token, id_customer]
+        INSERT INTO customer_integrations
+          (id_customer, platform, resource_id, resource_name, resource_type, resource_access_token, status)
+        VALUES
+          ($1, $2, $3, $4, $5, $6, 'connected')
+        ON CONFLICT (id_customer, platform)
+        DO UPDATE SET
+          resource_id           = EXCLUDED.resource_id,
+          resource_name         = EXCLUDED.resource_name,
+          resource_type         = EXCLUDED.resource_type,
+          resource_access_token = EXCLUDED.resource_access_token,
+          status                = 'connected',
+          updated_at            = NOW()
+        `,
+        [id_customer, p, resource_id, resource_name || null, resource_type, resource_access_token]
       );
+
+      if (p === 'facebook') {
+        await client.query(
+          `
+          UPDATE customer
+          SET
+            id_facebook_page = $1,
+            access_token_page_facebook = $2,
+            updated_at = NOW()
+          WHERE id_customer = $3
+          `,
+          [resource_id, resource_access_token, id_customer]
+        );
+      } else {
+        await client.query(
+          `
+          UPDATE customer
+          SET
+            id_instagram_page = $1,
+            access_token_page_instagram = $2,
+            updated_at = NOW()
+          WHERE id_customer = $3
+          `,
+          [resource_id, resource_access_token, id_customer]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (transactionError) {
+      await client.query('ROLLBACK');
+      throw transactionError;
+    } finally {
+      client.release();
     }
 
-    if (p === 'instagram') {
-      await pool.query(
-        `
-        UPDATE customer
-        SET
-          id_instagram_page = $1,
-          access_token_page_instagram = $2,
-          updated_at = NOW()
-        WHERE id_customer = $3
-      `,
-        [resource_id, resource_access_token, id_customer]
-      );
-    }
+    const sync = schedulePlatformSync(id_customer, p);
 
-    if (p === 'facebook') await processCustomerMetricsPlatform(id_customer, 'facebook');
-    else await processCustomerMetricsPlatform(id_customer, 'instagram');
-
-    return res.json({ success: true });
+    return res.json({
+      success: true,
+      sync: { status: sync.scheduled ? 'scheduled' : 'already_running' }
+    });
   } catch (err) {
-    console.error('connectResource error:', err);
+    console.error('connectResource error:', toSafeError(err));
     return res.status(500).json({ success: false, message: 'Erro ao conectar recurso Meta' });
   }
 };
@@ -378,7 +391,7 @@ exports.getMetaAdAccounts = async (req, res) => {
     const adAccounts = await metaAdsService.listAdAccounts(tokenRow.access_token);
     return res.json({ success: true, adAccounts });
   } catch (err) {
-    console.error('getMetaAdAccounts error:', err.response?.data || err.message);
+    console.error('getMetaAdAccounts error:', toSafeError(err));
     const status = err.response?.status || 500;
     const message = err.response?.data?.error?.message || 'Erro ao listar contas de anuncios Meta';
     return res.status(status).json({ success: false, message });
@@ -463,7 +476,7 @@ exports.connectMetaAdAccount = async (req, res) => {
 
     return res.json({ success: true, resource_id: normalizedAdAccountId });
   } catch (err) {
-    console.error('connectMetaAdAccount error:', err);
+    console.error('connectMetaAdAccount error:', toSafeError(err));
     return res.status(500).json({ success: false, message: 'Erro ao conectar conta de anuncios Meta' });
   }
 };
@@ -507,7 +520,7 @@ exports.getMetaAdsStatus = async (req, res) => {
       ...operational
     });
   } catch (err) {
-    console.error('getMetaAdsStatus error:', err);
+    console.error('getMetaAdsStatus error:', toSafeError(err));
     return res.status(500).json({ success: false, message: 'Erro ao verificar status do Meta Ads' });
   }
 };
@@ -574,7 +587,7 @@ exports.getMetaAdsInsights = async (req, res) => {
       ...insights
     });
   } catch (err) {
-    console.error('getMetaAdsInsights error:', err.response?.data || err.message);
+    console.error('getMetaAdsInsights error:', toSafeError(err));
     const status = err.response?.status || 500;
     const message = err.response?.data?.error?.message || 'Erro ao buscar dados de Meta Ads';
     return res.status(status).json({ success: false, message });
@@ -632,7 +645,7 @@ exports.checkMetaStatus = async (req, res) => {
       instagramDaysLeft: null,
     });
   } catch (err) {
-    console.error('checkMetaStatus error:', err);
+    console.error('checkMetaStatus error:', toSafeError(err));
     return res.status(500).json({ success: false });
   }
 };

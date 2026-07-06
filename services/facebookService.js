@@ -2,19 +2,23 @@
 const axios = require('axios');
 const { splitDateRange, formatDate } = require('../utils/dateUtils');
 
-const BASE_URL = 'https://graph.facebook.com/v22.0';
+const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
+const BASE_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const REQUEST_TIMEOUT_MS = Number(process.env.META_GRAPH_TIMEOUT_MS) || 15000;
 
 exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day') => {
   const allValues = [];
 
   for (const [since, until] of splitDateRange(startDate, endDate, 30)) {
-    const response = await axios.get(`${BASE_URL}/${pageId}/insights/page_impressions_unique`, {
+    const response = await axios.get(`${BASE_URL}/${pageId}/insights`, {
       params: {
+        metric: 'page_impressions_unique',
         access_token: accessToken,
         period,
         since: formatDate(since),
         until: formatDate(until)
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     if (response.status === 200) {
@@ -39,7 +43,8 @@ exports.getImpressions = async (pageId, accessToken, startDate, endDate, period 
         period,
         since: formatDate(since),
         until: formatDate(until)
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     if (response.status === 200) {
@@ -58,7 +63,8 @@ exports.getFollowers = async (pageId, accessToken, startDate, endDate, period = 
     params: {
       fields: 'fan_count',
       access_token: accessToken
-    }
+    },
+    timeout: REQUEST_TIMEOUT_MS
   });
 
   if (response.status === 200) {
@@ -80,7 +86,7 @@ exports.getAllMetricsRows = async (id_customer, pageId, accessToken, startDate, 
     data: new Date(startDate.getTime() + index * 86400000),
     page_impressions: value,
     page_impressions_unique: reach[index] || 0,
-    page_follows: follows[index] || 0
+    page_follows: Number(follows) || 0
   }));
 };
 
@@ -96,7 +102,8 @@ exports.getAllMetricsPosts = async (pageId, accessToken, startDate, endDate, per
         since: formatDate(since),
         until: formatDate(until),
         fields: fields
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     if (response.status === 200) {

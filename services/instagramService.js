@@ -2,7 +2,9 @@
 const axios = require('axios');
 const { splitDateRange, formatDate, isInRange } = require('../utils/dateUtils');
 
-const BASE_URL = 'https://graph.facebook.com/v22.0';
+const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
+const BASE_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const REQUEST_TIMEOUT_MS = Number(process.env.META_GRAPH_TIMEOUT_MS) || 15000;
 
 exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day') => {
   const allValues = [];
@@ -15,7 +17,8 @@ exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day
         period,
         since: formatDate(since),
         until: formatDate(until)
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS
     });
 
     if (response.status === 200) {
@@ -51,7 +54,8 @@ exports.getImpressions = async (pageId, accessToken, startDate, endDate) => {
           period: 'day',
           since: formattedSince,
           until: formattedUntil
-        }
+        },
+        timeout: REQUEST_TIMEOUT_MS
       });
 
       let dailyValue = 0;
@@ -76,7 +80,8 @@ exports.getFollowers = async (pageId, accessToken, startDate, endDate, period = 
     params: {
       fields: 'followers_count',
       access_token: accessToken
-    }
+    },
+    timeout: REQUEST_TIMEOUT_MS
   });
 
   if (response.status === 200) {
@@ -112,7 +117,10 @@ exports.getAllMetricsPosts = async (pageId, accessToken, startDate, endDate, per
   };
 
   while (url) {
-    const response = await axios.get(url, { params });
+    const response = await axios.get(url, {
+      params,
+      timeout: REQUEST_TIMEOUT_MS
+    });
 
     if (response.status === 200) {
       const items = response.data?.data || [];

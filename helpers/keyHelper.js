@@ -187,7 +187,7 @@ const getInstagramCustomerKey = async (id_user, id_customer) => {
   try {
     const { rows } = await pool.query(
       `
-        SELECT resource_id, resource_access_token, access_token
+        SELECT resource_id, resource_name, resource_access_token, access_token
         FROM customer_integrations
         WHERE id_customer = $1 AND platform = 'instagram'
         LIMIT 1
@@ -201,7 +201,11 @@ const getInstagramCustomerKey = async (id_user, id_customer) => {
     const token = row.resource_access_token || row.access_token;
     if (!token) return null;
 
-    const instagramKeys = { page_id: row.resource_id, access_token: token };
+    const instagramKeys = {
+      page_id: row.resource_id,
+      resource_name: row.resource_name || null,
+      access_token: token
+    };
 
     cache.set(cacheKey, { data: instagramKeys, expires: Date.now() + 1000 * 60 * 5 });
 
