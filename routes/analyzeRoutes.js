@@ -14,6 +14,7 @@ function aliasClientIdToCustomerId(req, _res, next) {
 
 router.post(
   '/',
+  analyzeController.logAnalyzeRequest,
   authenticateToken,
   requirePermission('analyses:run'),
   aliasClientIdToCustomerId,
