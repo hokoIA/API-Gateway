@@ -3,9 +3,18 @@ const axios = require('axios');
 const querystring = require('querystring');
 const { pool } = require('../config/db');
 
-const LINKEDIN_CLIENT_ID = '77b662p87zgthq';
-const LINKEDIN_CLIENT_SECRET = 'WPL_AP1.xnVHxAwFB1tPCa0Y.D3jxLA==';
 const LINKEDIN_API_VERSION = '202508';
+
+function getLinkedInOAuthCredentials() {
+    const clientId = process.env.LINKEDIN_CLIENT_ID;
+    const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+        const err = new Error('LinkedIn OAuth nao configurado');
+        err.code = 'LINKEDIN_OAUTH_NOT_CONFIGURED';
+        throw err;
+    }
+    return { clientId, clientSecret };
+}
 
 async function getValidLinkedInAccessToken(id_user) {
     const { rows } = await pool.query(
@@ -26,14 +35,16 @@ async function getValidLinkedInAccessToken(id_user) {
         throw err;
     }
 
+    const { clientId, clientSecret } = getLinkedInOAuthCredentials();
+
     // refresh
     const tokenRes = await axios.post(
         'https://www.linkedin.com/oauth/v2/accessToken',
         querystring.stringify({
             grant_type: 'refresh_token',
             refresh_token: refresh_token_linkedin,
-            client_id: LINKEDIN_CLIENT_ID,
-            client_secret: LINKEDIN_CLIENT_SECRET
+            client_id: clientId,
+            client_secret: clientSecret
         }),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );

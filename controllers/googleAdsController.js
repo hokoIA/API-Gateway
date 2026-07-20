@@ -1,9 +1,11 @@
 const { google } = require('googleapis');
+const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { customerBelongsToAccount } = require('../middleware/tenantGuard');
 const { oauthConfig } = require('../config/oauth');
 const { getValidGoogleAdsAccessToken } = require('../helpers/googleAdsHelpers');
 const googleAdsService = require('../services/googleAdsService');
+const { toSafeError } = require('../utils/safeError');
 
 const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 const GOOGLE_ADS_SCOPES = [
@@ -14,19 +16,82 @@ const GOOGLE_ADS_SCOPES = [
 const FRONTEND_URL = (
   process.env.FRONTEND_BASE_URL || 'https://www.hokoainalytics.com'
 ).replace(/\/$/, '');
+const STATE_MAX_AGE_MS = 15 * 60 * 1000;
 
 const oauth2Client = new google.auth.OAuth2(
-  oauthConfig.google.clientId,
-  oauthConfig.google.clientSecret,
+  oauthConfig.google.adsClientId,
+  oauthConfig.google.adsClientSecret,
   oauthConfig.google.adsRedirectUri
 );
 
+function getDefaultLoginCustomerId() {
+  return googleAdsService.normalizeCustomerId(
+    process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID
+  );
+}
+
+function assertGoogleAdsOAuthConfigured() {
+  if (
+    !oauthConfig.google.adsClientId ||
+    !oauthConfig.google.adsClientSecret ||
+    !oauthConfig.google.adsRedirectUri
+  ) {
+    const error = new Error('Google Ads OAuth nao configurado');
+    error.code = 'google_ads_oauth_not_configured';
+    error.status = 503;
+    throw error;
+  }
+}
+
+function getStateSecret() {
+  const secret = process.env.OAUTH_STATE_SECRET || process.env.JWT_SECRET;
+  if (!secret) {
+    const error = new Error('OAUTH_STATE_SECRET ou JWT_SECRET nao configurado');
+    error.code = 'oauth_state_secret_not_configured';
+    error.status = 503;
+    throw error;
+  }
+  return secret;
+}
+
+function signStatePayload(payload) {
+  return crypto
+    .createHmac('sha256', getStateSecret())
+    .update(payload)
+    .digest('base64url');
+}
+
 function encodeState(value) {
-  return Buffer.from(JSON.stringify(value)).toString('base64url');
+  const payload = Buffer.from(
+    JSON.stringify({
+      ...value,
+      iat: Date.now(),
+      exp: Date.now() + STATE_MAX_AGE_MS,
+      nonce: crypto.randomBytes(16).toString('hex')
+    })
+  ).toString('base64url');
+  return `${payload}.${signStatePayload(payload)}`;
 }
 
 function decodeState(value) {
-  return JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+  const [payload, signature] = String(value || '').split('.');
+  if (!payload || !signature) throw new Error('State sem assinatura');
+
+  const expected = signStatePayload(payload);
+  const providedBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (
+    providedBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  ) {
+    throw new Error('Assinatura do state invalida');
+  }
+
+  const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  if (!decoded.exp || Number(decoded.exp) < Date.now()) {
+    throw new Error('State expirado');
+  }
+  return decoded;
 }
 
 function parseScopes(value) {
@@ -87,18 +152,24 @@ async function assertCallbackTenant(idUser, idCustomer) {
 }
 
 exports.startOAuth = async (req, res) => {
-  const idCustomer = req.query.id_customer;
-  if (!idCustomer) return res.status(400).send('id_customer e obrigatorio');
+  try {
+    assertGoogleAdsOAuthConfigured();
+    const idCustomer = req.query.id_customer;
+    if (!idCustomer) return res.status(400).send('id_customer e obrigatorio');
 
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: GOOGLE_ADS_SCOPES,
-    prompt: 'consent',
-    include_granted_scopes: false,
-    state: encodeState({ id_user: req.user.id, id_customer: idCustomer })
-  });
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: GOOGLE_ADS_SCOPES,
+      prompt: 'consent',
+      include_granted_scopes: false,
+      state: encodeState({ id_user: req.user.id, id_customer: idCustomer })
+    });
 
-  return res.redirect(authUrl);
+    return res.redirect(authUrl);
+  } catch (error) {
+    console.error('Google Ads OAuth start:', toSafeError(error));
+    return apiError(res, error, 'Erro ao iniciar OAuth do Google Ads');
+  }
 };
 
 exports.handleOAuthCallback = async (req, res) => {
@@ -116,6 +187,7 @@ exports.handleOAuthCallback = async (req, res) => {
   if (!idUser || !idCustomer) return res.status(400).send('State incompleto');
 
   try {
+    assertGoogleAdsOAuthConfigured();
     const belongs = await assertCallbackTenant(idUser, idCustomer);
     if (!belongs) return res.status(404).send('Recurso nao encontrado');
 
@@ -173,7 +245,7 @@ exports.handleOAuthCallback = async (req, res) => {
       `${FRONTEND_URL}/clientes?open=${encodeURIComponent(idCustomer)}${suffix}`
     );
   } catch (error) {
-    console.error('Google Ads OAuth callback:', error.response?.data || error);
+    console.error('Google Ads OAuth callback:', toSafeError(error));
     return res.status(500).send('Erro ao autenticar com Google Ads');
   }
 };
@@ -188,6 +260,7 @@ exports.getAccounts = async (req, res) => {
   }
 
   try {
+    assertGoogleAdsOAuthConfigured();
     const integrationResult = await pool.query(
       `
         SELECT scopes
@@ -226,7 +299,7 @@ exports.getAccounts = async (req, res) => {
     const result = await googleAdsService.listAccounts(accessToken);
     return res.json({ success: true, ...result });
   } catch (error) {
-    console.error('Google Ads accounts:', error.response?.data || error);
+    console.error('Google Ads accounts:', toSafeError(error));
     return apiError(res, error, 'Erro ao listar contas Google Ads');
   }
 };
@@ -250,10 +323,35 @@ exports.connectAccount = async (req, res) => {
   }
 
   try {
+    assertGoogleAdsOAuthConfigured();
     const normalizedResourceId =
       googleAdsService.normalizeCustomerId(resourceId);
     const normalizedLoginId =
-      googleAdsService.normalizeCustomerId(loginCustomerId);
+      googleAdsService.normalizeCustomerId(loginCustomerId) ||
+      getDefaultLoginCustomerId();
+
+    const accessToken = await getValidGoogleAdsAccessToken(idCustomer);
+    const customerDetails = await googleAdsService.getCustomerDetails({
+      customerId: normalizedResourceId,
+      accessToken,
+      loginCustomerId: normalizedLoginId
+    });
+
+    if (!customerDetails?.account_id) {
+      return res.status(404).json({
+        success: false,
+        code: 'google_ads_account_not_found',
+        message: 'Conta Google Ads nao encontrada ou sem acesso'
+      });
+    }
+
+    if (customerDetails.manager) {
+      return res.status(400).json({
+        success: false,
+        code: 'google_ads_manager_not_selectable',
+        message: 'Selecione uma conta anunciante, nao uma conta administradora'
+      });
+    }
 
     const result = await pool.query(
       `
@@ -270,12 +368,12 @@ exports.connectAccount = async (req, res) => {
       `,
       [
         normalizedResourceId,
-        resourceName || normalizedResourceId,
+        customerDetails?.name || resourceName || normalizedResourceId,
         JSON.stringify({
-          currency_code: currencyCode || null,
-          time_zone: timeZone || null,
+          currency_code: customerDetails?.currency_code || currencyCode || null,
+          time_zone: customerDetails?.time_zone || timeZone || null,
           login_customer_id: normalizedLoginId || null,
-          test_account: Boolean(testAccount)
+          test_account: Boolean(customerDetails?.test_account || testAccount)
         }),
         idCustomer
       ]
@@ -290,7 +388,7 @@ exports.connectAccount = async (req, res) => {
 
     return res.json({ success: true, resource_id: normalizedResourceId });
   } catch (error) {
-    console.error('Google Ads connect:', error);
+    console.error('Google Ads connect:', toSafeError(error));
     return apiError(res, error, 'Erro ao conectar conta Google Ads');
   }
 };
@@ -363,7 +461,7 @@ exports.checkStatus = async (req, res) => {
       meta: row.meta || {}
     });
   } catch (error) {
-    console.error('Google Ads status:', error);
+    console.error('Google Ads status:', toSafeError(error));
     return apiError(res, error, 'Erro ao verificar status do Google Ads');
   }
 };
@@ -381,6 +479,7 @@ exports.getInsights = async (req, res) => {
   }
 
   try {
+    assertGoogleAdsOAuthConfigured();
     const result = await pool.query(
       `
         SELECT scopes, resource_id, resource_name, meta
@@ -410,7 +509,8 @@ exports.getInsights = async (req, res) => {
     const insights = await googleAdsService.getInsights({
       customerId: integration.resource_id,
       accessToken,
-      loginCustomerId: integration.meta?.login_customer_id,
+      loginCustomerId:
+        integration.meta?.login_customer_id || getDefaultLoginCustomerId(),
       startDate: period.startDate,
       endDate: period.endDate
     });
@@ -427,7 +527,7 @@ exports.getInsights = async (req, res) => {
       ...insights
     });
   } catch (error) {
-    console.error('Google Ads insights:', error.response?.data || error);
+    console.error('Google Ads insights:', toSafeError(error));
     return apiError(res, error, 'Erro ao buscar metricas do Google Ads');
   }
 };

@@ -98,6 +98,32 @@ async function getDirectCustomer(customerId, accessToken) {
   return normalizeCustomerResource(rows[0]?.customer);
 }
 
+async function getCustomerDetails({
+  customerId,
+  accessToken,
+  loginCustomerId
+}) {
+  const rows = await search(
+    customerId,
+    accessToken,
+    `
+      SELECT
+        customer.id,
+        customer.descriptive_name,
+        customer.currency_code,
+        customer.time_zone,
+        customer.manager,
+        customer.test_account,
+        customer.status
+      FROM customer
+      LIMIT 1
+    `,
+    loginCustomerId
+  );
+
+  return normalizeCustomerResource(rows[0]?.customer, loginCustomerId);
+}
+
 async function getManagerClients(managerId, accessToken) {
   const rows = await search(
     managerId,
@@ -431,6 +457,7 @@ async function getInsights({
 }
 
 module.exports = {
+  getCustomerDetails,
   getInsights,
   listAccounts,
   normalizeCustomerId

@@ -3,12 +3,26 @@ const { pool } = require('../config/db');
 const { oauthConfig } = require('../config/oauth');
 
 const oauth2Client = new google.auth.OAuth2(
-  oauthConfig.google.clientId,
-  oauthConfig.google.clientSecret,
+  oauthConfig.google.adsClientId,
+  oauthConfig.google.adsClientSecret,
   oauthConfig.google.adsRedirectUri
 );
 
+function assertGoogleAdsOAuthConfigured() {
+  if (
+    !oauthConfig.google.adsClientId ||
+    !oauthConfig.google.adsClientSecret ||
+    !oauthConfig.google.adsRedirectUri
+  ) {
+    const error = new Error('Google Ads OAuth nao configurado');
+    error.code = 'google_ads_oauth_not_configured';
+    error.status = 503;
+    throw error;
+  }
+}
+
 async function getValidGoogleAdsAccessToken(idCustomer) {
+  assertGoogleAdsOAuthConfigured();
   const result = await pool.query(
     `
       SELECT access_token, refresh_token, expires_at

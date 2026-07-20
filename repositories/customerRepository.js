@@ -214,7 +214,9 @@ const removeCustomerPlatformAuth = async (id_customer, platform) => {
         resource_id = NULL,
         resource_name = NULL,
         resource_type = NULL,
-        status = 'not_authorized'
+        meta = NULL,
+        status = 'not_authorized',
+        updated_at = NOW()
       WHERE id_customer = $1 AND platform = $2
       `,
       [id_customer, platform]
