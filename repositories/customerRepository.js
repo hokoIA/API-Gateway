@@ -214,7 +214,7 @@ const removeCustomerPlatformAuth = async (id_customer, platform) => {
         resource_id = NULL,
         resource_name = NULL,
         resource_type = NULL,
-        meta = NULL,
+        meta = '{}'::jsonb,
         status = 'not_authorized',
         updated_at = NOW()
       WHERE id_customer = $1 AND platform = $2

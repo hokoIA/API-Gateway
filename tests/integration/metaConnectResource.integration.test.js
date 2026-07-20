@@ -113,3 +113,32 @@ test('Meta resource connection rolls back and does not schedule after a database
   assert.equal(queries.at(-1), 'ROLLBACK');
   assert.deepEqual(scheduled, []);
 });
+
+test('Customer platform removal clears Google Ads auth without nulling integration meta', async () => {
+  const queries = [];
+  pool.connect = async () => ({
+    query: async (sql, params) => {
+      queries.push({ sql: String(sql).trim(), params });
+      return { rows: [], rowCount: 1 };
+    },
+    release() {}
+  });
+
+  await customerRepository.removeCustomerPlatformAuth('192', 'google_ads');
+
+  const update = queries.find((entry) =>
+    entry.sql.startsWith('UPDATE customer_integrations')
+  );
+
+  assert.ok(update);
+  assert.match(update.sql, /meta = '\{\}'::jsonb/);
+  assert.doesNotMatch(update.sql, /meta = NULL/);
+  assert.match(update.sql, /status = 'not_authorized'/);
+  assert.deepEqual(update.params, ['192', 'google_ads']);
+  assert.equal(queries[0].sql, 'BEGIN');
+  assert.equal(queries.at(-1).sql, 'COMMIT');
+  assert.equal(
+    queries.some((entry) => entry.sql.startsWith('DELETE FROM')),
+    false
+  );
+});
