@@ -119,19 +119,33 @@ function normalizePeriod(body = {}) {
   return { startDate: String(startDate), endDate: String(endDate) };
 }
 
+function getProviderErrorBody(error) {
+  const data = error?.response?.data;
+  return Array.isArray(data) ? data[0]?.error : data?.error;
+}
+
+function getGoogleAdsPrimaryError(providerError) {
+  const detail = Array.isArray(providerError?.details)
+    ? providerError.details.find((item) => Array.isArray(item?.errors))
+    : null;
+  return detail?.errors?.[0] || null;
+}
+
 function apiError(res, error, fallbackMessage) {
   const status =
     error.status ||
     error.response?.status ||
     (error.code === 'google_ads_not_configured' ? 503 : 500);
-  const googleError = error.response?.data?.error;
+  const googleError = getProviderErrorBody(error);
+  const googleAdsError = getGoogleAdsPrimaryError(googleError);
   const message =
+    googleAdsError?.message ||
     googleError?.message ||
     error.message ||
     fallbackMessage;
   const code =
     error.code ||
-    googleError?.details?.[0]?.errors?.[0]?.errorCode ||
+    googleAdsError?.errorCode ||
     null;
 
   return res.status(status).json({

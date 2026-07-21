@@ -39,12 +39,17 @@ function rowsFromSearchStream(data) {
 
 async function search(customerId, accessToken, query, loginCustomerId) {
   const normalizedCustomerId = normalizeCustomerId(customerId);
-  const { data } = await axios.post(
-    `${BASE_URL}/customers/${normalizedCustomerId}/googleAds:searchStream`,
-    { query },
-    { headers: headers(accessToken, loginCustomerId), timeout: 45_000 }
-  );
-  return rowsFromSearchStream(data);
+  try {
+    const { data } = await axios.post(
+      `${BASE_URL}/customers/${normalizedCustomerId}/googleAds:searchStream`,
+      { query },
+      { headers: headers(accessToken, loginCustomerId), timeout: 45_000 }
+    );
+    return rowsFromSearchStream(data);
+  } catch (error) {
+    error.googleAdsQuery = query;
+    throw error;
+  }
 }
 
 async function listAccessibleCustomerIds(accessToken) {
@@ -212,6 +217,10 @@ function moneyFromMicros(value) {
   return number(value) / 1_000_000;
 }
 
+function ratio(numerator, denominator) {
+  return denominator > 0 ? numerator / denominator : 0;
+}
+
 function indexBy(rows, getId) {
   return new Map(
     rows
@@ -266,12 +275,10 @@ async function getInsights({
       campaign.status,
       campaign.advertising_channel_type,
       metrics.cost_micros,
+      metrics.clicks,
       metrics.impressions,
-      metrics.average_cpm,
       metrics.conversions,
-      metrics.conversions_value,
-      metrics.conversions_value_per_cost,
-      metrics.cost_per_conversion
+      metrics.conversions_value
     FROM campaign
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
       AND campaign.status != 'REMOVED'
@@ -286,11 +293,10 @@ async function getInsights({
       ad_group.name,
       ad_group.status,
       metrics.cost_micros,
+      metrics.clicks,
       metrics.impressions,
-      metrics.average_cpm,
       metrics.ctr,
-      metrics.conversions,
-      metrics.cost_per_conversion
+      metrics.conversions
     FROM ad_group
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
       AND ad_group.status != 'REMOVED'
@@ -308,12 +314,10 @@ async function getInsights({
       ad_group_ad.ad.type,
       ad_group_ad.status,
       metrics.cost_micros,
+      metrics.clicks,
       metrics.impressions,
       metrics.ctr,
-      metrics.average_cpc,
-      metrics.average_cpm,
-      metrics.conversions,
-      metrics.cost_per_conversion
+      metrics.conversions
     FROM ad_group_ad
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
       AND ad_group_ad.status != 'REMOVED'
@@ -339,6 +343,10 @@ async function getInsights({
 
   const campaign = campaignRows.map((row) => {
     const metrics = row.metrics || {};
+    const investment = moneyFromMicros(metrics.costMicros);
+    const impressions = number(metrics.impressions);
+    const conversions = number(metrics.conversions);
+    const conversionValue = number(metrics.conversionsValue);
     const reachMetrics =
       campaignReach.get(String(row.campaign?.id))?.metrics || {};
 
@@ -347,22 +355,26 @@ async function getInsights({
       name: row.campaign?.name || String(row.campaign?.id || ''),
       status: row.campaign?.status || null,
       objective: row.campaign?.advertisingChannelType || null,
-      investment: moneyFromMicros(metrics.costMicros),
-      impressions: number(metrics.impressions),
+      investment,
+      impressions,
       reach: optionalNumber(reachMetrics.uniqueUsers),
       frequency: optionalNumber(
         reachMetrics.averageImpressionFrequencyPerUser
       ),
-      cpm: moneyFromMicros(metrics.averageCpm),
-      conversions: number(metrics.conversions),
-      conversionValue: number(metrics.conversionsValue),
-      roas: number(metrics.conversionsValuePerCost),
-      costPerConversion: moneyFromMicros(metrics.costPerConversion)
+      cpm: ratio(investment * 1000, impressions),
+      conversions,
+      conversionValue,
+      roas: ratio(conversionValue, investment),
+      costPerConversion: ratio(investment, conversions)
     };
   });
 
   const adSet = adGroupRows.map((row) => {
     const metrics = row.metrics || {};
+    const investment = moneyFromMicros(metrics.costMicros);
+    const impressions = number(metrics.impressions);
+    const clicks = number(metrics.clicks);
+    const conversions = number(metrics.conversions);
 
     return {
       id: String(row.adGroup?.id || ''),
@@ -370,20 +382,25 @@ async function getInsights({
       campaignId: String(row.campaign?.id || ''),
       campaignName: row.campaign?.name || null,
       status: row.adGroup?.status || null,
-      investment: moneyFromMicros(metrics.costMicros),
-      impressions: number(metrics.impressions),
+      investment,
+      impressions,
+      clicks,
       reach: null,
       frequency: null,
-      cpm: moneyFromMicros(metrics.averageCpm),
+      cpm: ratio(investment * 1000, impressions),
       ctr: number(metrics.ctr) * 100,
-      conversions: number(metrics.conversions),
-      costPerConversion: moneyFromMicros(metrics.costPerConversion)
+      conversions,
+      costPerConversion: ratio(investment, conversions)
     };
   });
 
   const ad = adRows.map((row) => {
     const metrics = row.metrics || {};
     const adResource = row.adGroupAd?.ad || {};
+    const investment = moneyFromMicros(metrics.costMicros);
+    const impressions = number(metrics.impressions);
+    const clicks = number(metrics.clicks);
+    const conversions = number(metrics.conversions);
 
     return {
       id: String(adResource.id || ''),
@@ -396,13 +413,14 @@ async function getInsights({
       adsetId: String(row.adGroup?.id || ''),
       adsetName: row.adGroup?.name || null,
       status: row.adGroupAd?.status || null,
-      investment: moneyFromMicros(metrics.costMicros),
-      impressions: number(metrics.impressions),
+      investment,
+      impressions,
+      clicks,
       ctr: number(metrics.ctr) * 100,
-      cpc: moneyFromMicros(metrics.averageCpc),
-      cpm: moneyFromMicros(metrics.averageCpm),
-      conversions: number(metrics.conversions),
-      costPerConversion: moneyFromMicros(metrics.costPerConversion)
+      cpc: ratio(investment, clicks),
+      cpm: ratio(investment * 1000, impressions),
+      conversions,
+      costPerConversion: ratio(investment, conversions)
     };
   });
 

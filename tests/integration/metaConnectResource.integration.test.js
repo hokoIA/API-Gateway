@@ -1,12 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const axios = require('axios');
 
 const { pool } = require('../../config/db');
 const customerRepository = require('../../repositories/customerRepository');
+const googleAdsService = require('../../services/googleAdsService');
 const syncScheduler = require('../../services/platformSyncScheduler');
 
 const originalConnect = pool.connect;
 const originalCheckCustomer = customerRepository.checkCustomerBelongsToUser;
+const originalAxiosPost = axios.post;
+const originalDeveloperToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 const originalSchedule = syncScheduler.schedulePlatformSync;
 
 let scheduled = [];
@@ -36,6 +40,12 @@ function responseRecorder() {
 
 test.afterEach(() => {
   scheduled = [];
+  axios.post = originalAxiosPost;
+  if (originalDeveloperToken === undefined) {
+    delete process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  } else {
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = originalDeveloperToken;
+  }
 });
 
 test.after(() => {
@@ -141,4 +151,97 @@ test('Customer platform removal clears Google Ads auth without nulling integrati
     queries.some((entry) => entry.sql.startsWith('DELETE FROM')),
     false
   );
+});
+
+test('Google Ads insights uses raw metrics and computes derived KPIs locally', async () => {
+  process.env.GOOGLE_ADS_DEVELOPER_TOKEN = 'developer-token';
+  const calls = [];
+  axios.post = async (url, body) => {
+    calls.push({ url, query: body.query });
+
+    if (body.query.includes('metrics.unique_users')) {
+      return { data: [{ results: [] }] };
+    }
+
+    if (body.query.includes('FROM campaign')) {
+      return {
+        data: [{
+          results: [{
+            campaign: {
+              id: '1',
+              name: 'Campanha',
+              status: 'ENABLED',
+              advertisingChannelType: 'SEARCH'
+            },
+            metrics: {
+              costMicros: '1230000',
+              clicks: '10',
+              impressions: '1000',
+              conversions: '2',
+              conversionsValue: '12.3'
+            }
+          }]
+        }]
+      };
+    }
+
+    if (body.query.includes('FROM ad_group_ad')) {
+      return {
+        data: [{
+          results: [{
+            campaign: { id: '1', name: 'Campanha' },
+            adGroup: { id: '2', name: 'Grupo' },
+            adGroupAd: {
+              status: 'ENABLED',
+              ad: { id: '3', name: 'Anuncio', type: 'TEXT_AD' }
+            },
+            metrics: {
+              costMicros: '500000',
+              clicks: '5',
+              impressions: '100',
+              ctr: '0.05',
+              conversions: '1'
+            }
+          }]
+        }]
+      };
+    }
+
+    return {
+      data: [{
+        results: [{
+          campaign: { id: '1', name: 'Campanha' },
+          adGroup: { id: '2', name: 'Grupo', status: 'ENABLED' },
+          metrics: {
+            costMicros: '750000',
+            clicks: '3',
+            impressions: '150',
+            ctr: '0.02',
+            conversions: '1'
+          }
+        }]
+      }]
+    };
+  };
+
+  const insights = await googleAdsService.getInsights({
+    customerId: '8096776560',
+    accessToken: 'access-token',
+    loginCustomerId: null,
+    startDate: '2026-06-21',
+    endDate: '2026-07-21'
+  });
+
+  const combinedQueries = calls.map((call) => call.query).join('\n');
+  assert.doesNotMatch(combinedQueries, /metrics\.average_cpm/);
+  assert.doesNotMatch(combinedQueries, /metrics\.average_cpc/);
+  assert.doesNotMatch(combinedQueries, /metrics\.cost_per_conversion/);
+  assert.doesNotMatch(combinedQueries, /metrics\.conversions_value_per_cost/);
+  assert.match(combinedQueries, /metrics\.clicks/);
+
+  assert.equal(insights.campaign[0].cpm, 1.23);
+  assert.equal(insights.campaign[0].costPerConversion, 0.615);
+  assert.equal(insights.campaign[0].roas, 10);
+  assert.equal(insights.adSet[0].cpm, 5);
+  assert.equal(insights.ad[0].cpc, 0.1);
 });

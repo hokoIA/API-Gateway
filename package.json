@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
+    "smoke:google-ads": "node scripts/googleAdsSmoke.js",
     "test": "node --test --test-concurrency=1 tests/unit/metaAuthService.test.js tests/unit/platformSyncScheduler.test.js tests/unit/facebookService.test.js tests/unit/instagramPostsAnalysisService.test.js tests/unit/analyzePayloadService.test.js tests/integration/metaAdsStatus.integration.test.js tests/integration/metaConnectResource.integration.test.js tests/integration/googleAds.integration.test.js tests/integration/analyzeProxy.integration.test.js",
     "test:unit": "node --test --test-concurrency=1 tests/unit/metaAuthService.test.js tests/unit/platformSyncScheduler.test.js tests/unit/facebookService.test.js tests/unit/instagramPostsAnalysisService.test.js tests/unit/analyzePayloadService.test.js",
     "test:integration": "node --test --test-concurrency=1 tests/integration/metaAdsStatus.integration.test.js tests/integration/metaConnectResource.integration.test.js tests/integration/googleAds.integration.test.js tests/integration/analyzeProxy.integration.test.js"

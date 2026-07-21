@@ -1,5 +1,10 @@
+function getProviderErrorBody(error) {
+  const data = error?.response?.data;
+  return Array.isArray(data) ? data[0]?.error : data?.error;
+}
+
 function toSafeError(error) {
-  const providerError = error?.response?.data?.error;
+  const providerError = getProviderErrorBody(error);
   const googleAdsDetail = Array.isArray(providerError?.details)
     ? providerError.details.find((detail) => Array.isArray(detail?.errors))
     : null;
@@ -7,7 +12,11 @@ function toSafeError(error) {
 
   return {
     name: error?.name || 'Error',
-    message: providerError?.message || error?.message || 'Unknown error',
+    message:
+      googleAdsPrimaryError?.message ||
+      providerError?.message ||
+      error?.message ||
+      'Unknown error',
     code: error?.code || null,
     status: error?.response?.status || error?.status || null,
     provider: providerError ? {
@@ -18,6 +27,8 @@ function toSafeError(error) {
       traceId: providerError.fbtrace_id || null,
       requestId: googleAdsDetail?.requestId || null,
       errorCode: googleAdsPrimaryError?.errorCode || null,
+      fieldPath: googleAdsPrimaryError?.location?.fieldPathElements || null,
+      trigger: googleAdsPrimaryError?.trigger || null,
       errorMessage: googleAdsPrimaryError?.message || null
     } : null
   };
