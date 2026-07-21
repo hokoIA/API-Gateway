@@ -24,9 +24,9 @@ const oauth2Client = new google.auth.OAuth2(
   oauthConfig.google.adsRedirectUri
 );
 
-function getDefaultLoginCustomerId() {
+function getIntegrationLoginCustomerId(integration) {
   return googleAdsService.normalizeCustomerId(
-    process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID
+    integration?.meta?.login_customer_id
   );
 }
 
@@ -139,6 +139,65 @@ function apiError(res, error, fallbackMessage) {
     code,
     message
   });
+}
+
+function isGoogleAdsForbidden(error) {
+  return Number(error?.response?.status || error?.status) === 403;
+}
+
+async function updateGoogleAdsLoginCustomerId(idCustomer, loginCustomerId) {
+  await pool.query(
+    `
+      UPDATE customer_integrations
+      SET meta = COALESCE(meta, '{}'::jsonb) || $1::jsonb,
+          updated_at = NOW()
+      WHERE id_customer = $2 AND platform = 'google_ads'
+    `,
+    [
+      JSON.stringify({
+        login_customer_id: loginCustomerId || null
+      }),
+      idCustomer
+    ]
+  );
+}
+
+async function getInsightsWithLoginFallback({
+  idCustomer,
+  integration,
+  accessToken,
+  period
+}) {
+  const storedLoginCustomerId = getIntegrationLoginCustomerId(integration);
+
+  try {
+    return {
+      insights: await googleAdsService.getInsights({
+        customerId: integration.resource_id,
+        accessToken,
+        loginCustomerId: storedLoginCustomerId || null,
+        startDate: period.startDate,
+        endDate: period.endDate
+      }),
+      loginCustomerId: storedLoginCustomerId || null
+    };
+  } catch (error) {
+    if (!storedLoginCustomerId || !isGoogleAdsForbidden(error)) throw error;
+
+    const insights = await googleAdsService.getInsights({
+      customerId: integration.resource_id,
+      accessToken,
+      loginCustomerId: null,
+      startDate: period.startDate,
+      endDate: period.endDate
+    });
+    await updateGoogleAdsLoginCustomerId(idCustomer, null);
+
+    return {
+      insights,
+      loginCustomerId: null
+    };
+  }
 }
 
 async function assertCallbackTenant(idUser, idCustomer) {
@@ -322,13 +381,12 @@ exports.connectAccount = async (req, res) => {
     });
   }
 
-  try {
+    try {
     assertGoogleAdsOAuthConfigured();
     const normalizedResourceId =
       googleAdsService.normalizeCustomerId(resourceId);
     const normalizedLoginId =
-      googleAdsService.normalizeCustomerId(loginCustomerId) ||
-      getDefaultLoginCustomerId();
+      googleAdsService.normalizeCustomerId(loginCustomerId);
 
     const accessToken = await getValidGoogleAdsAccessToken(idCustomer);
     const customerDetails = await googleAdsService.getCustomerDetails({
@@ -506,14 +564,16 @@ exports.getInsights = async (req, res) => {
     }
 
     const accessToken = await getValidGoogleAdsAccessToken(idCustomer);
-    const insights = await googleAdsService.getInsights({
-      customerId: integration.resource_id,
+    const { insights, loginCustomerId } = await getInsightsWithLoginFallback({
+      idCustomer,
+      integration,
       accessToken,
-      loginCustomerId:
-        integration.meta?.login_customer_id || getDefaultLoginCustomerId(),
-      startDate: period.startDate,
-      endDate: period.endDate
+      period
     });
+    const resourceMeta = {
+      ...(integration.meta || {}),
+      login_customer_id: loginCustomerId
+    };
 
     return res.json({
       success: true,
@@ -521,7 +581,7 @@ exports.getInsights = async (req, res) => {
       resource: {
         id: integration.resource_id,
         name: integration.resource_name,
-        meta: integration.meta || {}
+        meta: resourceMeta
       },
       period,
       ...insights
