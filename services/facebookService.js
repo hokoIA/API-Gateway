@@ -75,6 +75,25 @@ function isUnsupportedRangeTotal(error) {
   );
 }
 
+function isInvalidReachMetric(error) {
+  const message = String(error.message || '').toLowerCase();
+  return error.status === 400 &&
+    error.metaCode === 100 &&
+    message.includes('valid insights metric');
+}
+
+function unavailableReachMetrics(reason) {
+  return {
+    labels: [],
+    values: [],
+    total: null,
+    error: {
+      code: 'facebook_reach_unavailable',
+      message: reason
+    }
+  };
+}
+
 exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period = 'day', options = {}) => {
   const allPoints = [];
   const untilExclusive = options.endDateInclusive === false
@@ -148,16 +167,23 @@ exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
 };
 
 exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
-  const [series, total] = await Promise.all([
-    exports.getReachSeries(pageId, accessToken, startDate, endDate),
-    exports.getReachTotal(pageId, accessToken, startDate, endDate)
-  ]);
+  try {
+    const [series, total] = await Promise.all([
+      exports.getReachSeries(pageId, accessToken, startDate, endDate),
+      exports.getReachTotal(pageId, accessToken, startDate, endDate)
+    ]);
 
-  return {
-    labels: series.labels,
-    values: series.values,
-    total
-  };
+    return {
+      labels: series.labels,
+      values: series.values,
+      total
+    };
+  } catch (error) {
+    if (isInvalidReachMetric(error)) {
+      return unavailableReachMetrics('Meta não disponibiliza mais a métrica de alcance orgânico do Facebook para esta Page/API.');
+    }
+    throw error;
+  }
 };
 
 exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day') => {

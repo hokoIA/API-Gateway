@@ -115,6 +115,34 @@ test('Facebook reach metrics returns null when exact range total is unsupported'
   assert.equal(metrics.total, null);
 });
 
+test('Facebook reach metrics does not fail the dashboard when Meta deprecates the Page reach metric', async () => {
+  axios.get = async () => {
+    const error = new Error('Request failed');
+    error.response = {
+      status: 400,
+      data: {
+        error: {
+          code: 100,
+          message: '(#100) The value must be a valid insights metric'
+        }
+      }
+    };
+    throw error;
+  };
+
+  const metrics = await facebookService.getReachMetrics(
+    'page-id',
+    'page-token',
+    '2026-06-29',
+    '2026-07-28'
+  );
+
+  assert.deepEqual(metrics.labels, []);
+  assert.deepEqual(metrics.values, []);
+  assert.equal(metrics.total, null);
+  assert.equal(metrics.error.code, 'facebook_reach_unavailable');
+});
+
 test('Facebook rows preserve the scalar page follower count', async () => {
   facebookService.getImpressions = async () => [3, 5];
   facebookService.getReach = async () => [2, 4];

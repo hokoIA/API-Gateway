@@ -7,7 +7,7 @@ const linkedinService = require('../services/linkedinService');
 const { formatDate, getMetaUntilExclusive } = require('../utils/dateUtils');
 
 function emptyReachMetrics() {
-  return { labels: [], values: [], total: null };
+  return { labels: [], values: [], total: null, error: null };
 }
 
 function mergeLabels(...series) {
@@ -48,6 +48,10 @@ exports.getReachMetrics = async (req, res) => {
       totals: {
         facebook: facebookData.total,
         instagram: instagramData.total
+      },
+      errors: {
+        facebook: facebookData.error || null,
+        instagram: instagramData.error || null
       },
       period: {
         startDate: formatDate(startDate),
