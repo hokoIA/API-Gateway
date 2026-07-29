@@ -12,6 +12,14 @@ exports.splitDateRange = function* (start, end, deltaDays = 30) {
 
 exports.formatDate = (date) => new Date(date).toISOString().split('T')[0];
 
+exports.addDaysIso = (date, days) => {
+  const base = new Date(`${exports.formatDate(date)}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().split('T')[0];
+};
+
+exports.getMetaUntilExclusive = (endDate) => exports.addDaysIso(endDate, 1);
+
 exports.getAllDaysBetween = (start, end) => {
   const startDate = new Date(start);
   const endDate = new Date(end);

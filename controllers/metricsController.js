@@ -4,6 +4,23 @@ const facebookService = require('../services/facebookService');
 const googleAnalyticsService = require('../services/googleAnalyticsService');
 const instagramService = require('../services/instagramService');
 const linkedinService = require('../services/linkedinService');
+const { formatDate, getMetaUntilExclusive } = require('../utils/dateUtils');
+
+function emptyReachMetrics() {
+  return { labels: [], values: [], total: null };
+}
+
+function mergeLabels(...series) {
+  return [...new Set(series.flatMap((item) => item.labels || []))].sort();
+}
+
+function alignValues(labels, series) {
+  const byLabel = new Map();
+  (series.labels || []).forEach((label, index) => {
+    byLabel.set(label, Number(series.values?.[index]) || 0);
+  });
+  return labels.map((label) => byLabel.get(label) || 0);
+}
 
 exports.getReachMetrics = async (req, res) => {
   try {
@@ -13,46 +30,40 @@ exports.getReachMetrics = async (req, res) => {
     const facebook = await getFacebookCustomerKey(id_user, id_customer);
     const instagram = await getInstagramCustomerKey(id_user, id_customer);
 
-    const promises = [];
+    const [facebookData, instagramData] = await Promise.all([
+      facebook && facebook.page_id && facebook.access_token
+        ? facebookService.getReachMetrics(facebook.page_id, facebook.access_token, startDate, endDate)
+        : Promise.resolve(emptyReachMetrics()),
+      instagram && instagram.page_id && instagram.access_token
+        ? instagramService.getReachMetrics(instagram.page_id, instagram.access_token, startDate, endDate)
+        : Promise.resolve(emptyReachMetrics())
+    ]);
 
-    // Facebook
-    if (facebook && facebook.page_id && facebook.access_token) {
-      promises.push(facebookService.getReach(facebook.page_id, facebook.access_token, startDate, endDate));
-    } else {
-      promises.push(Promise.resolve([]));
-    }
+    const labels = mergeLabels(facebookData, instagramData);
 
-    // Instagram
-    if (instagram && instagram.page_id && instagram.access_token) {
-      promises.push(instagramService.getReach(instagram.page_id, instagram.access_token, startDate, endDate));
-    } else {
-      promises.push(Promise.resolve([]));
-    }
-
-    const [facebookData, instagramData] = await Promise.allSettled(promises);
-
-    // Extrair valores ou usar array vazio se rejeitado
-    const results = {
-      labels: [],
-      facebook: facebookData.status === 'fulfilled' ? facebookData.value : [],
-      instagram: instagramData.status === 'fulfilled' ? instagramData.value : []
-    };
-
-    // Gerar labels baseado no maior array de dados disponível
-    const maxLength = Math.max(results.facebook.length, results.instagram.length);
-
-    if (maxLength > 0) {
-      results.labels = Array.from({ length: maxLength }, (_, i) => {
-        const date = new Date(startDate);
-        date.setDate(date.getDate() + i);
-        return date.toISOString().split('T')[0];
-      });
-    }
-
-    res.json(results);
+    res.json({
+      labels,
+      facebook: alignValues(labels, facebookData),
+      instagram: alignValues(labels, instagramData),
+      totals: {
+        facebook: facebookData.total,
+        instagram: instagramData.total
+      },
+      period: {
+        startDate: formatDate(startDate),
+        endDate: formatDate(endDate),
+        endDateInclusive: true,
+        metaUntilExclusive: getMetaUntilExclusive(endDate)
+      }
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Erro ao buscar dados de alcance' });
+    console.error('Erro ao buscar dados de alcance', {
+      message: err.message,
+      status: err.status,
+      metaCode: err.metaCode,
+      isMetaApiError: Boolean(err.isMetaApiError)
+    });
+    res.status(err.isMetaApiError ? 502 : 500).json({ message: 'Erro ao buscar dados de alcance' });
   }
 };
 
