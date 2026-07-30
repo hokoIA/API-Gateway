@@ -219,3 +219,91 @@ test('Instagram reach metrics propagates Meta errors instead of returning zero',
     /Erro Instagram API - reach .*status 500/
   );
 });
+
+test('Instagram reach metrics uses total_over_range for a consolidated total longer than 30 days', async () => {
+  const calls = [];
+  axios.get = async (url, config) => {
+    calls.push(config.params);
+    if (config.params.period === 'total_over_range') {
+      return {
+        status: 200,
+        data: { data: [{ values: [{ value: 418 }] }] }
+      };
+    }
+    return {
+      status: 200,
+      data: {
+        data: [{
+          values: [
+            { value: 10, end_time: `${config.params.until}T00:00:00+0000` }
+          ]
+        }]
+      }
+    };
+  };
+
+  const metrics = await instagramService.getReachMetrics(
+    'ig-id',
+    'ig-token',
+    '2026-06-01',
+    '2026-07-02'
+  );
+
+  assert.deepEqual(metrics.values, [10, 10]);
+  assert.equal(metrics.total, 418);
+  assert.equal(metrics.error, null);
+  assert.equal(calls.length, 3);
+  const totalCall = calls.find((params) => params.period === 'total_over_range');
+  assert.equal(totalCall.metric, 'reach');
+  assert.equal(totalCall.since, '2026-06-01');
+  assert.equal(totalCall.until, '2026-07-03');
+  assert.equal(totalCall.metric_type, undefined);
+  assert.deepEqual(
+    calls
+      .filter((params) => params.period === 'day')
+      .map((params) => [params.since, params.until]),
+    [['2026-06-01', '2026-07-01'], ['2026-07-01', '2026-07-03']]
+  );
+});
+
+test('Instagram reach metrics keeps long daily series when total_over_range is rejected', async () => {
+  const calls = [];
+  axios.get = async (url, config) => {
+    calls.push(config.params);
+    if (config.params.period === 'total_over_range') {
+      const error = new Error('Request failed');
+      error.response = {
+        status: 400,
+        data: {
+          error: {
+            code: 100,
+            message: '(#100) Unsupported period total_over_range.'
+          }
+        }
+      };
+      throw error;
+    }
+    return {
+      status: 200,
+      data: {
+        data: [{
+          values: [
+            { value: 10, end_time: `${config.params.until}T00:00:00+0000` }
+          ]
+        }]
+      }
+    };
+  };
+
+  const metrics = await instagramService.getReachMetrics(
+    'ig-id',
+    'ig-token',
+    '2026-06-01',
+    '2026-07-02'
+  );
+
+  assert.deepEqual(metrics.values, [10, 10]);
+  assert.equal(metrics.total, null);
+  assert.equal(metrics.error.code, 'instagram_reach_total_window_limit');
+  assert.equal(calls.length, 3);
+});

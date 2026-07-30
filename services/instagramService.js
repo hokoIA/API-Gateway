@@ -63,8 +63,31 @@ function extractDailySeries(data, fallbackStartDate) {
 }
 
 function extractTotalValue(data) {
-  const total = data?.data?.[0]?.total_value?.value;
+  const metric = data?.data?.[0];
+  const total = metric?.total_value?.value ?? metric?.values?.[0]?.value;
   return total === undefined || total === null ? null : Number(total);
+}
+
+function daysBetween(since, untilExclusive) {
+  const start = new Date(`${formatDate(since)}T00:00:00Z`).getTime();
+  const end = new Date(`${formatDate(untilExclusive)}T00:00:00Z`).getTime();
+  return Math.round((end - start) / 86400000);
+}
+
+function isReachTotalWindowLimit(error) {
+  const message = String(error.message || '').toLowerCase();
+  return error.isMetaRangeLimit ||
+    (error.status === 400 &&
+      error.metaCode === 100 &&
+      (message.includes('more than 30 days') ||
+        message.includes('reach consolidated total over range')));
+}
+
+function unavailableTotal(reason) {
+  return {
+    code: 'instagram_reach_total_window_limit',
+    message: reason
+  };
 }
 
 exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period = 'day', options = {}) => {
@@ -103,13 +126,16 @@ exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period 
 
 exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
   const untilExclusive = getMetaUntilExclusive(endDate);
+  const isLongRange = daysBetween(startDate, untilExclusive) > 30;
+
   const response = await getMetaInsights(pageId, accessToken, {
     metric: 'reach',
-    metric_type: 'total_value',
-    period: 'day',
+    ...(isLongRange
+      ? { period: 'total_over_range' }
+      : { metric_type: 'total_value', period: 'day' }),
     since: formatDate(startDate),
     until: untilExclusive
-  }, 'reach consolidated total');
+  }, isLongRange ? 'reach consolidated total over range' : 'reach consolidated total');
 
   const total = extractTotalValue(response.data);
   if (total === null || Number.isNaN(total)) {
@@ -128,15 +154,28 @@ exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
 };
 
 exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
-  const [series, total] = await Promise.all([
+  const totalPromise = exports.getReachTotal(pageId, accessToken, startDate, endDate)
+    .then((total) => ({ total, error: null }))
+    .catch((error) => {
+      if (isReachTotalWindowLimit(error)) {
+        return {
+          total: null,
+          error: unavailableTotal('A Meta API só retorna alcance consolidado do Instagram para janelas de até 30 dias.')
+        };
+      }
+      throw error;
+    });
+
+  const [series, totalResult] = await Promise.all([
     exports.getReachSeries(pageId, accessToken, startDate, endDate),
-    exports.getReachTotal(pageId, accessToken, startDate, endDate)
+    totalPromise
   ]);
 
   return {
     labels: series.labels,
     values: series.values,
-    total
+    total: totalResult.total,
+    error: totalResult.error
   };
 };
 
