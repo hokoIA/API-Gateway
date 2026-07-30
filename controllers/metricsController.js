@@ -53,6 +53,9 @@ exports.getReachMetrics = async (req, res) => {
         facebook: facebookData.error || null,
         instagram: instagramData.error || null
       },
+      diagnostics: {
+        instagramReachTotal: instagramData.diagnostics || null
+      },
       period: {
         startDate: formatDate(startDate),
         endDate: formatDate(endDate),

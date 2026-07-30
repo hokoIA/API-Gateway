@@ -252,7 +252,9 @@ test('Instagram reach metrics uses total_over_range for a consolidated total lon
   assert.deepEqual(metrics.values, [10, 10]);
   assert.equal(metrics.total, 418);
   assert.equal(metrics.error, null);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
+  assert.equal(metrics.diagnostics.length, 2);
+  assert.ok(metrics.diagnostics.every((attempt) => attempt.status === 'accepted'));
   const totalCall = calls.find((params) => params.period === 'total_over_range');
   assert.equal(totalCall.metric, 'reach');
   assert.equal(totalCall.since, '2026-06-01');
@@ -266,7 +268,7 @@ test('Instagram reach metrics uses total_over_range for a consolidated total lon
   );
 });
 
-test('Instagram reach metrics retries total_over_range with total_value when needed', async () => {
+test('Instagram reach metrics reports both total_over_range strategies', async () => {
   const calls = [];
   axios.get = async (url, config) => {
     calls.push(config.params);
@@ -300,10 +302,10 @@ test('Instagram reach metrics retries total_over_range with total_value when nee
 
   assert.equal(metrics.total, 418);
   assert.equal(metrics.error, null);
-  const totalCalls = calls.filter((params) => params.period === 'total_over_range');
-  assert.equal(totalCalls.length, 2);
-  assert.equal(totalCalls[0].metric_type, undefined);
-  assert.equal(totalCalls[1].metric_type, 'total_value');
+  assert.deepEqual(
+    metrics.diagnostics.map((attempt) => [attempt.strategy, attempt.status]),
+    [['total_over_range', 'empty'], ['total_over_range_total_value', 'accepted']]
+  );
 });
 
 test('Instagram reach metrics keeps long daily series when total_over_range is rejected', async () => {
@@ -345,5 +347,40 @@ test('Instagram reach metrics keeps long daily series when total_over_range is r
   assert.deepEqual(metrics.values, [10, 10]);
   assert.equal(metrics.total, null);
   assert.equal(metrics.error.code, 'instagram_reach_total_window_limit');
+  assert.ok(metrics.diagnostics.every((attempt) => attempt.status === 'rejected'));
   assert.equal(calls.length, 4);
+});
+
+test('Instagram views uses bounded concurrency for long periods', async () => {
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+  const calls = [];
+
+  axios.get = async (url, config) => {
+    calls.push(config.params);
+    activeRequests += 1;
+    maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    activeRequests -= 1;
+    return {
+      status: 200,
+      data: {
+        data: [{
+          total_value: { value: Number(config.params.since.slice(-2)) }
+        }]
+      }
+    };
+  };
+
+  const values = await instagramService.getImpressions(
+    'ig-id',
+    'ig-token',
+    '2026-07-01',
+    '2026-07-10'
+  );
+
+  assert.deepEqual(values, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(calls.length, 10);
+  assert.ok(maxActiveRequests > 1);
+  assert.ok(maxActiveRequests <= 6);
 });

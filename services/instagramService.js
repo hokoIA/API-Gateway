@@ -74,21 +74,64 @@ function daysBetween(since, untilExclusive) {
   return Math.round((end - start) / 86400000);
 }
 
-function isReachTotalWindowLimit(error) {
-  const message = String(error.message || '').toLowerCase();
-  if (error.isReachTotalUnavailable) return true;
-  return error.isMetaRangeLimit ||
-    (error.status === 400 &&
-      error.metaCode === 100 &&
-      (message.includes('more than 30 days') ||
-        message.includes('reach consolidated total over range')));
-}
-
 function unavailableTotal(reason) {
   return {
     code: 'instagram_reach_total_window_limit',
     message: reason
   };
+}
+
+function sanitizeAttemptError(error) {
+  return {
+    status: error.status || null,
+    metaCode: error.metaCode || null,
+    message: error.message
+  };
+}
+
+async function runReachTotalAttempt(pageId, accessToken, startDate, untilExclusive, strategy, params) {
+  try {
+    const response = await getMetaInsights(pageId, accessToken, {
+      metric: 'reach',
+      ...params,
+      since: formatDate(startDate),
+      until: untilExclusive
+    }, `reach total test ${strategy}`);
+    const total = extractTotalValue(response.data);
+    const metric = response.data?.data?.[0];
+
+    return {
+      strategy,
+      status: total !== null && !Number.isNaN(total) ? 'accepted' : 'empty',
+      total: total !== null && !Number.isNaN(total) ? total : null,
+      query: {
+        period: params.period,
+        metricType: params.metric_type || null
+      },
+      responseShape: {
+        dataCount: Array.isArray(response.data?.data) ? response.data.data.length : 0,
+        hasTotalValue: metric?.total_value?.value !== undefined,
+        valuesCount: Array.isArray(metric?.values) ? metric.values.length : 0
+      },
+      error: null
+    };
+  } catch (error) {
+    return {
+      strategy,
+      status: 'rejected',
+      total: null,
+      query: {
+        period: params.period,
+        metricType: params.metric_type || null
+      },
+      responseShape: null,
+      error: sanitizeAttemptError(error)
+    };
+  }
+}
+
+function totalFromDiagnostics(diagnostics) {
+  return diagnostics.find((attempt) => attempt.status === 'accepted')?.total ?? null;
 }
 
 exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period = 'day', options = {}) => {
@@ -128,67 +171,76 @@ exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period 
 exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
   const untilExclusive = getMetaUntilExclusive(endDate);
   const isLongRange = daysBetween(startDate, untilExclusive) > 30;
-  const attempts = isLongRange
-    ? [
-        { metric: 'reach', period: 'total_over_range' },
-        { metric: 'reach', period: 'total_over_range', metric_type: 'total_value' }
-      ]
-    : [{ metric: 'reach', metric_type: 'total_value', period: 'day' }];
-  let lastError = null;
-
-  for (const params of attempts) {
-    try {
-      const response = await getMetaInsights(pageId, accessToken, {
-        ...params,
-        since: formatDate(startDate),
-        until: untilExclusive
-      }, isLongRange ? 'reach consolidated total over range' : 'reach consolidated total');
-
-      const total = extractTotalValue(response.data);
-      if (total !== null && !Number.isNaN(total)) {
-        debugReach({
-          type: 'total',
-          startDate: formatDate(startDate),
-          endDate: formatDate(endDate),
-          untilExclusive,
-          period: params.period,
-          metricType: params.metric_type || null,
-          total
-        });
-
-        return total;
-      }
-
-      lastError = new Error('Erro Instagram API - reach consolidated total sem valor consolidado');
-    } catch (error) {
-      if (!isLongRange || error.status !== 400 || error.metaCode !== 100) {
-        throw error;
-      }
-      lastError = error;
-    }
-  }
 
   if (isLongRange) {
-    lastError = lastError || new Error('Instagram reach consolidated total indisponível');
-    lastError.isReachTotalUnavailable = true;
-    throw lastError;
+    const diagnostics = await exports.getReachTotalDiagnostics(pageId, accessToken, startDate, endDate);
+    return totalFromDiagnostics(diagnostics);
   }
 
-  throw lastError;
+  const response = await getMetaInsights(pageId, accessToken, {
+    metric: 'reach',
+    metric_type: 'total_value',
+    period: 'day',
+    since: formatDate(startDate),
+    until: untilExclusive
+  }, 'reach consolidated total');
+  const total = extractTotalValue(response.data);
+
+  if (total === null || Number.isNaN(total)) {
+    throw new Error('Erro Instagram API - reach consolidated total sem total_value');
+  }
+
+  return total;
+};
+
+exports.getReachTotalDiagnostics = async (pageId, accessToken, startDate, endDate) => {
+  const untilExclusive = getMetaUntilExclusive(endDate);
+  const diagnostics = await Promise.all([
+    runReachTotalAttempt(
+      pageId,
+      accessToken,
+      startDate,
+      untilExclusive,
+      'total_over_range',
+      { period: 'total_over_range' }
+    ),
+    runReachTotalAttempt(
+      pageId,
+      accessToken,
+      startDate,
+      untilExclusive,
+      'total_over_range_total_value',
+      { period: 'total_over_range', metric_type: 'total_value' }
+    )
+  ]);
+
+  console.info('[meta-insights:instagram-reach-total-test]', JSON.stringify({
+    startDate: formatDate(startDate),
+    endDate: formatDate(endDate),
+    untilExclusive,
+    attempts: diagnostics
+  }));
+
+  return diagnostics;
 };
 
 exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
-  const totalPromise = exports.getReachTotal(pageId, accessToken, startDate, endDate)
-    .then((total) => ({ total, error: null }))
-    .catch((error) => {
-      if (isReachTotalWindowLimit(error)) {
-        return {
-          total: null,
-          error: unavailableTotal('A Meta API não retornou alcance consolidado para o período selecionado.')
-        };
-      }
-      throw error;
-    });
+  const untilExclusive = getMetaUntilExclusive(endDate);
+  const isLongRange = daysBetween(startDate, untilExclusive) > 30;
+  const totalPromise = isLongRange
+    ? exports.getReachTotalDiagnostics(pageId, accessToken, startDate, endDate)
+        .then((diagnostics) => {
+          const total = totalFromDiagnostics(diagnostics);
+          return {
+            total,
+            diagnostics,
+            error: total === null
+              ? unavailableTotal('As estratégias de alcance consolidado foram testadas e recusadas pela Meta.')
+              : null
+          };
+        })
+    : exports.getReachTotal(pageId, accessToken, startDate, endDate)
+        .then((total) => ({ total, diagnostics: null, error: null }));
 
   const [series, totalResult] = await Promise.all([
     exports.getReachSeries(pageId, accessToken, startDate, endDate),
@@ -199,10 +251,10 @@ exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
     labels: series.labels,
     values: series.values,
     total: totalResult.total,
-    error: totalResult.error
+    error: totalResult.error,
+    diagnostics: totalResult.diagnostics
   };
 };
-
 exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day') => {
   const series = await exports.getReachSeries(pageId, accessToken, startDate, endDate, period, {
     endDateInclusive: false
@@ -211,48 +263,67 @@ exports.getReach = async (pageId, accessToken, startDate, endDate, period = 'day
 };
 
 exports.getImpressions = async (pageId, accessToken, startDate, endDate) => {
-  const allValues = [];
-
+  const ranges = [];
   let current = new Date(startDate);
   const finalDate = new Date(endDate);
 
   while (current <= finalDate) {
     const nextDate = new Date(current);
     nextDate.setDate(nextDate.getDate() + 1);
-
-    const formattedSince = formatDate(current);
-    const formattedUntil = formatDate(nextDate);
-
-    try {
-      const response = await axios.get(`${BASE_URL}/${pageId}/insights`, {
-        params: {
-          metric: 'views',
-          metric_type: 'total_value',
-          access_token: accessToken,
-          period: 'day',
-          since: formattedSince,
-          until: formattedUntil
-        },
-        timeout: REQUEST_TIMEOUT_MS
-      });
-
-      let dailyValue = 0;
-
-      if (response.data?.data?.length > 0 && response.data.data[0].total_value?.value !== undefined) {
-        dailyValue = response.data.data[0].total_value.value;
-      }
-
-      allValues.push(dailyValue);
-
-    } catch (error) {
-      allValues.push(0);
-    }
-
+    ranges.push({
+      since: formatDate(current),
+      until: formatDate(nextDate)
+    });
     current.setDate(current.getDate() + 1);
   }
-  return allValues;
-};
 
+  const concurrency = Math.min(
+    8,
+    Math.max(1, Number(process.env.META_GRAPH_DAILY_CONCURRENCY) || 6)
+  );
+  const values = new Array(ranges.length);
+  let nextIndex = 0;
+  let failedDays = 0;
+
+  async function worker() {
+    while (nextIndex < ranges.length) {
+      const index = nextIndex++;
+      const range = ranges[index];
+      try {
+        const response = await axios.get(`${BASE_URL}/${pageId}/insights`, {
+          params: {
+            metric: 'views',
+            metric_type: 'total_value',
+            access_token: accessToken,
+            period: 'day',
+            since: range.since,
+            until: range.until
+          },
+          timeout: REQUEST_TIMEOUT_MS
+        });
+        values[index] = Number(response.data?.data?.[0]?.total_value?.value) || 0;
+      } catch (error) {
+        failedDays += 1;
+        values[index] = 0;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, ranges.length) }, () => worker())
+  );
+
+  if (failedDays > 0) {
+    console.warn('[meta-insights:instagram-views]', {
+      startDate: formatDate(startDate),
+      endDate: formatDate(endDate),
+      failedDays,
+      requestedDays: ranges.length
+    });
+  }
+
+  return values;
+};
 exports.getFollowers = async (pageId, accessToken, startDate, endDate, period = 'day') => {
   const response = await axios.get(`${BASE_URL}/${pageId}`, {
     params: {
