@@ -140,7 +140,12 @@ exports.getImpressionMetrics = async (req, res) => {
 
     res.json(results);
   } catch (err) {
-    console.error(err);
+    console.error('Erro ao buscar dados de impressões', {
+      message: err.message,
+      status: err.status,
+      metaCode: err.metaCode,
+      isMetaApiError: Boolean(err.isMetaApiError)
+    });
     res.status(500).json({ message: 'Erro ao buscar dados de impressões' });
   }
 };

@@ -76,6 +76,7 @@ function daysBetween(since, untilExclusive) {
 
 function isReachTotalWindowLimit(error) {
   const message = String(error.message || '').toLowerCase();
+  if (error.isReachTotalUnavailable) return true;
   return error.isMetaRangeLimit ||
     (error.status === 400 &&
       error.metaCode === 100 &&
@@ -127,30 +128,53 @@ exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period 
 exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
   const untilExclusive = getMetaUntilExclusive(endDate);
   const isLongRange = daysBetween(startDate, untilExclusive) > 30;
+  const attempts = isLongRange
+    ? [
+        { metric: 'reach', period: 'total_over_range' },
+        { metric: 'reach', period: 'total_over_range', metric_type: 'total_value' }
+      ]
+    : [{ metric: 'reach', metric_type: 'total_value', period: 'day' }];
+  let lastError = null;
 
-  const response = await getMetaInsights(pageId, accessToken, {
-    metric: 'reach',
-    ...(isLongRange
-      ? { period: 'total_over_range' }
-      : { metric_type: 'total_value', period: 'day' }),
-    since: formatDate(startDate),
-    until: untilExclusive
-  }, isLongRange ? 'reach consolidated total over range' : 'reach consolidated total');
+  for (const params of attempts) {
+    try {
+      const response = await getMetaInsights(pageId, accessToken, {
+        ...params,
+        since: formatDate(startDate),
+        until: untilExclusive
+      }, isLongRange ? 'reach consolidated total over range' : 'reach consolidated total');
 
-  const total = extractTotalValue(response.data);
-  if (total === null || Number.isNaN(total)) {
-    throw new Error('Erro Instagram API - reach consolidated total sem total_value');
+      const total = extractTotalValue(response.data);
+      if (total !== null && !Number.isNaN(total)) {
+        debugReach({
+          type: 'total',
+          startDate: formatDate(startDate),
+          endDate: formatDate(endDate),
+          untilExclusive,
+          period: params.period,
+          metricType: params.metric_type || null,
+          total
+        });
+
+        return total;
+      }
+
+      lastError = new Error('Erro Instagram API - reach consolidated total sem valor consolidado');
+    } catch (error) {
+      if (!isLongRange || error.status !== 400 || error.metaCode !== 100) {
+        throw error;
+      }
+      lastError = error;
+    }
   }
 
-  debugReach({
-    type: 'total',
-    startDate: formatDate(startDate),
-    endDate: formatDate(endDate),
-    untilExclusive,
-    total
-  });
+  if (isLongRange) {
+    lastError = lastError || new Error('Instagram reach consolidated total indisponível');
+    lastError.isReachTotalUnavailable = true;
+    throw lastError;
+  }
 
-  return total;
+  throw lastError;
 };
 
 exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
@@ -160,7 +184,7 @@ exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
       if (isReachTotalWindowLimit(error)) {
         return {
           total: null,
-          error: unavailableTotal('A Meta API só retorna alcance consolidado do Instagram para janelas de até 30 dias.')
+          error: unavailableTotal('A Meta API não retornou alcance consolidado para o período selecionado.')
         };
       }
       throw error;

@@ -266,6 +266,46 @@ test('Instagram reach metrics uses total_over_range for a consolidated total lon
   );
 });
 
+test('Instagram reach metrics retries total_over_range with total_value when needed', async () => {
+  const calls = [];
+  axios.get = async (url, config) => {
+    calls.push(config.params);
+    if (config.params.period === 'total_over_range') {
+      if (config.params.metric_type === 'total_value') {
+        return {
+          status: 200,
+          data: { data: [{ total_value: { value: 418 } }] }
+        };
+      }
+      return { status: 200, data: { data: [] } };
+    }
+    return {
+      status: 200,
+      data: {
+        data: [{
+          values: [
+            { value: 10, end_time: `${config.params.until}T00:00:00+0000` }
+          ]
+        }]
+      }
+    };
+  };
+
+  const metrics = await instagramService.getReachMetrics(
+    'ig-id',
+    'ig-token',
+    '2026-06-01',
+    '2026-07-02'
+  );
+
+  assert.equal(metrics.total, 418);
+  assert.equal(metrics.error, null);
+  const totalCalls = calls.filter((params) => params.period === 'total_over_range');
+  assert.equal(totalCalls.length, 2);
+  assert.equal(totalCalls[0].metric_type, undefined);
+  assert.equal(totalCalls[1].metric_type, 'total_value');
+});
+
 test('Instagram reach metrics keeps long daily series when total_over_range is rejected', async () => {
   const calls = [];
   axios.get = async (url, config) => {
@@ -305,5 +345,5 @@ test('Instagram reach metrics keeps long daily series when total_over_range is r
   assert.deepEqual(metrics.values, [10, 10]);
   assert.equal(metrics.total, null);
   assert.equal(metrics.error.code, 'instagram_reach_total_window_limit');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
