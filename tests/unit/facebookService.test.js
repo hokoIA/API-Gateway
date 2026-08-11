@@ -22,7 +22,7 @@ test.afterEach(() => {
   facebookService.getFollowers = originalGetFollowers;
 });
 
-test('Facebook reach uses the Page Insights metric query', async () => {
+test('Facebook reach uses the Page Media Viewers metric query', async () => {
   const calls = [];
   axios.get = async (url, config) => {
     calls.push({ url, config });
@@ -41,7 +41,8 @@ test('Facebook reach uses the Page Insights metric query', async () => {
 
   assert.deepEqual(values, [7]);
   assert.match(calls[0].url, /\/112933568550788\/insights$/);
-  assert.equal(calls[0].config.params.metric, 'page_impressions_unique');
+  assert.match(calls[0].url, /graph\.facebook\.com\/v25\.0/);
+  assert.equal(calls[0].config.params.metric, 'page_total_media_view_unique');
   assert.equal(calls[0].config.params.since, '2026-01-01');
   assert.equal(calls[0].config.params.until, '2026-01-02');
   assert.equal(calls[0].config.timeout, 15000);
@@ -111,6 +112,43 @@ test('Facebook reach metrics returns null when exact range total is unsupported'
     '2026-06-30'
   );
 
+  assert.deepEqual(metrics.values, [20]);
+  assert.equal(metrics.total, null);
+});
+
+test('Facebook reach metrics preserves the series when only the exact total is unavailable', async () => {
+  axios.get = async (url, config) => {
+    if (config.params.period === 'total_over_range') {
+      const error = new Error('Request failed');
+      error.response = {
+        status: 400,
+        data: {
+          error: {
+            code: 100,
+            message: '(#100) The value must be a valid insights metric'
+          }
+        }
+      };
+      throw error;
+    }
+    return {
+      status: 200,
+      data: {
+        data: [{
+          values: [{ value: 20, end_time: '2026-07-01T00:00:00+0000' }]
+        }]
+      }
+    };
+  };
+
+  const metrics = await facebookService.getReachMetrics(
+    'page-id',
+    'page-token',
+    '2026-06-30',
+    '2026-06-30'
+  );
+
+  assert.deepEqual(metrics.labels, ['2026-06-30']);
   assert.deepEqual(metrics.values, [20]);
   assert.equal(metrics.total, null);
 });

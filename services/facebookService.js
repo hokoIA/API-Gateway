@@ -4,6 +4,9 @@ const { splitDateRange, formatDate, addDaysIso, getMetaUntilExclusive } = requir
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
 const BASE_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const PAGE_INSIGHTS_VERSION = process.env.META_PAGE_INSIGHTS_VERSION || 'v25.0';
+const PAGE_INSIGHTS_URL = `https://graph.facebook.com/${PAGE_INSIGHTS_VERSION}`;
+const PAGE_REACH_METRIC = 'page_total_media_view_unique';
 const REQUEST_TIMEOUT_MS = Number(process.env.META_GRAPH_TIMEOUT_MS) || 15000;
 
 function debugReach(payload) {
@@ -31,7 +34,7 @@ function buildMetaError(error, context) {
 
 async function getMetaInsights(pageId, accessToken, params, context) {
   try {
-    return await axios.get(`${BASE_URL}/${pageId}/insights`, {
+    return await axios.get(`${PAGE_INSIGHTS_URL}/${pageId}/insights`, {
       params: {
         ...params,
         access_token: accessToken
@@ -71,7 +74,7 @@ function isUnsupportedRangeTotal(error) {
   const message = String(error.message || '').toLowerCase();
   return error.status === 400 && (
     message.includes('total_over_range') ||
-    (message.includes('period') && message.includes('page_impressions_unique'))
+    (message.includes('period') && message.includes(PAGE_REACH_METRIC))
   );
 }
 
@@ -102,7 +105,7 @@ exports.getReachSeries = async (pageId, accessToken, startDate, endDate, period 
 
   for (const [since, until] of splitDateRange(startDate, untilExclusive, 30)) {
     const response = await getMetaInsights(pageId, accessToken, {
-      metric: 'page_impressions_unique',
+      metric: PAGE_REACH_METRIC,
       period,
       since: formatDate(since),
       until: formatDate(until)
@@ -133,7 +136,7 @@ exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
 
   try {
     const response = await getMetaInsights(pageId, accessToken, {
-      metric: 'page_impressions_unique',
+      metric: PAGE_REACH_METRIC,
       period: 'total_over_range',
       since: formatDate(startDate),
       until: untilExclusive
@@ -152,13 +155,13 @@ exports.getReachTotal = async (pageId, accessToken, startDate, endDate) => {
 
     return total;
   } catch (error) {
-    if (isUnsupportedRangeTotal(error)) {
+    if (isUnsupportedRangeTotal(error) || isInvalidReachMetric(error)) {
       debugReach({
         type: 'total_unavailable',
         startDate: formatDate(startDate),
         endDate: formatDate(endDate),
         untilExclusive,
-        reason: 'Meta Page Insights did not accept total_over_range for page_impressions_unique'
+        reason: `Meta Page Insights did not accept total_over_range for ${PAGE_REACH_METRIC}`
       });
       return null;
     }
@@ -180,7 +183,7 @@ exports.getReachMetrics = async (pageId, accessToken, startDate, endDate) => {
     };
   } catch (error) {
     if (isInvalidReachMetric(error)) {
-      return unavailableReachMetrics('Meta não disponibiliza mais a métrica de alcance orgânico do Facebook para esta Page/API.');
+      return unavailableReachMetrics('Meta não disponibilizou a métrica Media Viewers para esta Page/API.');
     }
     throw error;
   }
