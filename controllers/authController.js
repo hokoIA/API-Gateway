@@ -155,7 +155,8 @@ const registerUser = async (req, res) => {
         'page:customers:view',
         'page:chat:view',
         'customers:manage',
-        'analyses:run'
+        'analyses:run',
+        'platforms:connect'
       )
       ON CONFLICT DO NOTHING
       `,

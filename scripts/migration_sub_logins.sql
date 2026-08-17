@@ -274,7 +274,7 @@ WHERE lower(r.name) = 'admin'
 ON CONFLICT DO NOTHING;
 
 -- 5.5) role_permissions: Equipe = matriz confirmada
--- Equipe: pages dashboard/analyses/customers/chat + actions customers:manage/analyses:run
+-- Equipe: pages dashboard/analyses/customers/chat + actions customers:manage/analyses:run/platforms:connect
 INSERT INTO role_permissions (id_role, id_permission)
 SELECT r.id_role, p.id_permission
 FROM roles r
@@ -285,7 +285,8 @@ JOIN permissions p
     'page:customers:view',
     'page:chat:view',
     'customers:manage',
-    'analyses:run'
+    'analyses:run',
+    'platforms:connect'
   )
 WHERE lower(r.name) = 'equipe'
 ON CONFLICT DO NOTHING;
