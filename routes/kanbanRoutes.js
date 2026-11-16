@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/authMiddleware');
+const { requireCustomerInAccount } = require('../middleware/tenantGuard');
 const ctrl = require('../controllers/kanbanController');
 const external = require('../controllers/externalKanbanController');
 
@@ -8,9 +9,9 @@ router.get('/board-data', authenticateToken, ctrl.getBoardData);
 router.get('/team', authenticateToken, ctrl.listTeam);
 
 router.get('/clients', authenticateToken, ctrl.listClientsWithProfile);
-router.put('/clients/:id_customer/profile', authenticateToken, ctrl.upsertClientProfileByCustomerId);
-router.delete('/clients/:id_customer/profile', authenticateToken, ctrl.deleteClientProfileByCustomerId);
-router.get('/clients/:id_customer/portal-link', authenticateToken, ctrl.getClientPortalLink);
+router.put('/clients/:id_customer/profile', authenticateToken, requireCustomerInAccount(), ctrl.upsertClientProfileByCustomerId);
+router.delete('/clients/:id_customer/profile', authenticateToken, requireCustomerInAccount(), ctrl.deleteClientProfileByCustomerId);
+router.get('/clients/:id_customer/portal-link', authenticateToken, requireCustomerInAccount(), ctrl.getClientPortalLink);
 
 router.get('/labels', authenticateToken, ctrl.listLabels);
 router.post('/labels', authenticateToken, ctrl.createLabel);
@@ -24,9 +25,9 @@ router.delete('/columns/:id', authenticateToken, ctrl.deleteColumn);
 router.post('/columns/reorder', authenticateToken, ctrl.reorderColumns);
 
 router.get('/cards', authenticateToken, ctrl.listCards);
-router.post('/cards', authenticateToken, ctrl.createCard);
+router.post('/cards', authenticateToken, requireCustomerInAccount(), ctrl.createCard);
 router.get('/cards/:id', authenticateToken, ctrl.getCardExpanded);
-router.put('/cards/:id', authenticateToken, ctrl.updateCard);
+router.put('/cards/:id', authenticateToken, requireCustomerInAccount(), ctrl.updateCard);
 router.delete('/cards/:id', authenticateToken, ctrl.deleteCard);
 router.post('/cards/:id/move', authenticateToken, ctrl.moveCard);
 

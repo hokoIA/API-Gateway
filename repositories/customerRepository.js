@@ -26,7 +26,7 @@ const checkCustomerBelongsToUser = async (id_customer, id_user) => {
       SELECT 1
       FROM customer c
       JOIN "user" u ON u.id_user = c.id_user
-      WHERE c.id_customer = $1 AND u.id_account = $2
+      WHERE c.id_customer = $1 AND u.id_account = $2 AND c.status <> 'activating'
       LIMIT 1
     `,
     [Number(id_customer), Number(id_account)]
@@ -40,6 +40,48 @@ const createCustomer = async (id_user, name, company, email, phone) => {
     [id_user, name, company, email, phone]
   );
   return result.rows[0];
+};
+
+const createActivatingCustomer = async (id_user, name, company, email, phone) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const customerResult = await client.query(
+      `INSERT INTO customer (id_user, name, company, email, phone, status)
+       VALUES ($1, $2, $3, $4, $5, 'activating')
+       RETURNING id_customer, name, company, email, phone, status, created_at`,
+      [id_user, name, company, email, phone]
+    );
+    const customer = customerResult.rows[0];
+    const activationResult = await client.query(
+      `INSERT INTO customer_activation (id_customer)
+       VALUES ($1)
+       RETURNING id_activation, created_at`,
+      [customer.id_customer]
+    );
+    await client.query('COMMIT');
+    return { customer, activation: activationResult.rows[0] };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const getActivationByCustomerId = async (id_customer, id_account) => {
+  const result = await pool.query(
+    `SELECT c.id_customer, c.name, c.company, c.email, c.phone, c.status, c.created_at,
+            ca.id_activation, ca.created_at AS activation_created_at
+     FROM customer c
+     JOIN "user" u ON u.id_user = c.id_user
+     JOIN customer_activation ca ON ca.id_customer = c.id_customer
+     WHERE c.id_customer = $1 AND u.id_account = $2 AND c.status = 'activating'`,
+    [Number(id_customer), Number(id_account)]
+  );
+  if (!result.rows.length) return null;
+  const { id_activation, activation_created_at, ...customer } = result.rows[0];
+  return { customer, activation: { id_activation, created_at: activation_created_at } };
 };
 
 const deleteCustomer = async (id_customer, id_user) => {
@@ -135,7 +177,7 @@ const getCustomerKeys = async (id_customer, id_user = null) => {
 };
 
 // Agora lista por ACCOUNT (a partir do id_user)
-const getCustomersByUserId = async (id_user) => {
+const getCustomersByUserId = async (id_user, includeActivating = false) => {
   const id_account = await getAccountIdByUserId(id_user);
   if (!id_account) return [];
 
@@ -144,19 +186,19 @@ const getCustomersByUserId = async (id_user) => {
       SELECT c.*
       FROM customer c
       JOIN "user" u ON u.id_user = c.id_user
-      WHERE u.id_account = $1
+      WHERE u.id_account = $1 AND ($2::boolean OR c.status <> 'activating')
       ORDER BY c.created_at DESC
     `,
-    [Number(id_account)]
+    [Number(id_account), includeActivating]
   );
   return result.rows;
 };
 
-const getCustomersListByUserId = async (id_user) => {
+const getCustomersListByUserId = async (id_user, includeActivating = false) => {
   const id_account = await getAccountIdByUserId(id_user);
   if (!id_account) return [];
 
-  const result = await pool.query(
+  const queryList = (withActivationTable) => pool.query(
     `
     SELECT
       c.id_customer,
@@ -165,6 +207,7 @@ const getCustomersListByUserId = async (id_user) => {
       c.phone,
       c.created_at,
       c.status,
+      ${withActivationTable ? 'ca.id_activation' : 'NULL::uuid AS id_activation'},
       COALESCE(
         json_agg(
           json_build_object(
@@ -182,14 +225,25 @@ const getCustomersListByUserId = async (id_user) => {
     FROM customer c
     LEFT JOIN customer_integrations ci
       ON ci.id_customer = c.id_customer
+    ${withActivationTable ? 'LEFT JOIN customer_activation ca ON ca.id_customer = c.id_customer' : ''}
     JOIN "user" u
       ON u.id_user = c.id_user
-    WHERE u.id_account = $1
-    GROUP BY c.id_customer
+    WHERE u.id_account = $1 AND ($2::boolean OR c.status <> 'activating')
+    GROUP BY c.id_customer${withActivationTable ? ', ca.id_activation' : ''}
     ORDER BY c.created_at DESC
     `,
-    [Number(id_account)]
+    [Number(id_account), includeActivating && withActivationTable]
   );
+
+  let result;
+  try {
+    result = await queryList(true);
+  } catch (error) {
+    if (error.code !== '42P01') throw error;
+    // Durante a implantação coordenada, manter a carteira legada legível
+    // antes da migration criar customer_activation.
+    result = await queryList(false);
+  }
 
   return result.rows;
 };
@@ -296,4 +350,4 @@ const updateCustomer = async (id_customer, id_user, name, email, company, phone)
 };
 
 
-module.exports = { checkCustomerBelongsToUser, createCustomer, deleteCustomer, deactivateCustomer, getCustomerByIdCustomer, getCustomerKeys, getCustomersByUserId, getCustomersListByUserId, removeCustomerPlatformAuth, removePlatformFromUser, updateCustomer };
+module.exports = { checkCustomerBelongsToUser, createCustomer, createActivatingCustomer, getActivationByCustomerId, deleteCustomer, deactivateCustomer, getCustomerByIdCustomer, getCustomerKeys, getCustomersByUserId, getCustomersListByUserId, removeCustomerPlatformAuth, removePlatformFromUser, updateCustomer };

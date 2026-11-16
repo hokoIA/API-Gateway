@@ -79,7 +79,7 @@ async function listClientsWithProfile(id_user, id_account = null) {
       FROM customer c
       JOIN "user" owner_u ON owner_u.id_user = c.id_user
       LEFT JOIN kanban.client_profile cp ON cp.id_customer = c.id_customer AND cp.id_user = owner_u.id_user
-      WHERE owner_u.id_account = $1
+      WHERE owner_u.id_account = $1 AND c.status <> 'activating'
       ORDER BY lower(c.name) ASC`,
     [accountId]
   );

@@ -1,6 +1,6 @@
 // Arquivo: controllers/customerController.js
 const { pool } = require('../config/db');
-const { createCustomer, deleteCustomer, deactivateCustomer, getCustomerByIdCustomer, getCustomersByUserId, getCustomersListByUserId, removeCustomerPlatformAuth, updateCustomer, checkCustomerBelongsToUser } = require('../repositories/customerRepository');
+const { createActivatingCustomer, getActivationByCustomerId, deleteCustomer, deactivateCustomer, getCustomerByIdCustomer, getCustomersByUserId, getCustomersListByUserId, removeCustomerPlatformAuth, updateCustomer, checkCustomerBelongsToUser } = require('../repositories/customerRepository');
 const { refreshKeysForCustomer, getGoogleAnalyticsKeys, getLinkedinKeys, clearCacheForUser } = require('../helpers/keyHelper');
 const metricsOrchestrator = require('../usecases/processCustomerMetricsUseCase');
 const { syncExtraClientsForUser } = require('../services/stripeService');
@@ -38,35 +38,30 @@ const addCustomer = async (req, res) => {
     const id_user = req.user.id;
     const { name, company, email, phone } = req.body;
 
-    if (!name || !email) return res.status(400).json({ success: false, message: 'Nome e email são obrigatórios.' });
+    if (!String(name ?? '').trim() || !String(email ?? '').trim()) {
+      return res.status(400).json({ success: false, message: 'Nome e email são obrigatórios.' });
+    }
 
 
-    const customer = await createCustomer(
+    const { customer, activation } = await createActivatingCustomer(
       id_user,
-      name,
+      String(name).trim(),
       company || null,
-      email,
+      String(email).trim(),
       phone || null
     );
 
-    // Atualiza quantidade de clientes extras (acima de 3) no Stripe
-    try {
-      console.log('[ADD_CUSTOMER] id_user=', id_user, 'created id_customer=', customer.id_customer);
-      console.log('[ADD_CUSTOMER] calling syncExtraClientsForUser...');
-      await syncExtraClientsForUser(id_user);
-      console.log('[ADD_CUSTOMER] syncExtraClientsForUser done');
-    } catch (err) {
-      console.error('Erro ao sincronizar clientes extras no Stripe (addCustomer):', err);
-      // não bloqueia criação de cliente
-    }
-
     return res.status(201).json({
       success: true,
-      message: 'Cliente criado com sucesso.',
-      customer
+      message: 'Cliente em ativação criado com sucesso.',
+      customer,
+      activation
     });
   } catch (error) {
     console.error(error);
+    if (error.code === '42P01') {
+      return res.status(503).json({ success: false, message: 'Cadastro de ativação temporariamente indisponível.' });
+    }
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -124,7 +119,7 @@ const getCustomerById = async (req, res) => {
 const getCustomersByUser = async (req, res) => {
   try {
     const idUser = req.user.id;
-    const customers = await getCustomersByUserId(idUser);
+    const customers = await getCustomersByUserId(idUser, canManageActivation(req));
     res.status(200).json({ success: true, customers });
   } catch (error) {
     console.error('Erro ao buscar clientes:', error);
@@ -135,11 +130,29 @@ const getCustomersByUser = async (req, res) => {
 const getCustomersList = async (req, res) => {
   try {
     const idUser = req.user.id;
-    const customers = await getCustomersListByUserId(idUser);
+    const customers = await getCustomersListByUserId(idUser, canManageActivation(req));
     return res.status(200).json({ success: true, customers });
   } catch (error) {
     console.error('Erro ao buscar clientes (list):', error);
     return res.status(500).json({ success: false, message: 'Erro ao buscar clientes' });
+  }
+};
+
+function canManageActivation(req) {
+  return req.user.role === 'Admin' || (req.user.permissions || []).includes('activation:manage');
+}
+
+const getCustomerActivation = async (req, res) => {
+  try {
+    const result = await getActivationByCustomerId(req.params.id_customer, req.user.id_account);
+    if (!result) return res.status(404).json({ success: false, message: 'Recurso não encontrado.' });
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Erro ao buscar ativação:', error);
+    if (error.code === '42P01') {
+      return res.status(503).json({ success: false, message: 'Ativação temporariamente indisponível.' });
+    }
+    return res.status(500).json({ success: false, message: 'Erro ao buscar ativação.' });
   }
 };
 
@@ -232,6 +245,9 @@ const removePlatformCustomerById = async (req, res) => {
 
 const updateCustomerById = async (req, res) => {
   try {
+    if (req.customerStatus === 'activating' && !canManageActivation(req)) {
+      return res.status(403).json({ success: false, message: 'Acesso negado. Permissão insuficiente.' });
+    }
     const id_user = req.user.id;
     const id_customer = req.params.id_customer;
     const { name, email, company, phone } = req.body;
@@ -261,4 +277,4 @@ const updateCustomerById = async (req, res) => {
   }
 };
 
-module.exports = { addCustomer, deleteCustomerById, getCustomerById, getCustomersByUser, getCustomersList, refreshCustomerKeys, removePlatformCustomerById, updateCustomerById };
+module.exports = { addCustomer, deleteCustomerById, getCustomerById, getCustomerActivation, getCustomersByUser, getCustomersList, refreshCustomerKeys, removePlatformCustomerById, updateCustomerById };
